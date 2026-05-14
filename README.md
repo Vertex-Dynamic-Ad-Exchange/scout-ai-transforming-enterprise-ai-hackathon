@@ -1,0 +1,1 @@
+# scout-ai-transforming-enterprise-ai-hackathon
