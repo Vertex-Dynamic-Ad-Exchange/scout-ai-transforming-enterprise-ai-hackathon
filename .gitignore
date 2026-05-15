@@ -39,7 +39,4 @@ Thumbs.db
 *.swp
 
 # misc
-features/
-PRPs/
-.claude/
 ui/.vite/
