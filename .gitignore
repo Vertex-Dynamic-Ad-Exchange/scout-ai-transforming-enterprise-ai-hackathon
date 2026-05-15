@@ -1,0 +1,45 @@
+# Local reference material — not part of the project
+tutorials/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Demo-load manifest output (judge-readable artifact, regenerated each run)
+scripts/.demo-output/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Circle entity-secret recovery bundle — treat like the secret itself
+recovery_file_*.dat
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# misc
+features/
+PRPs/
+.claude/
+ui/.vite/
