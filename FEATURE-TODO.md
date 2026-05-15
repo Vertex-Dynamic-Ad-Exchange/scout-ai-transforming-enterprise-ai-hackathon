@@ -62,12 +62,15 @@
 
 ### Cluster C — Verifier agents (four developers could run in parallel; one prompt per PRP)
 
-- [ ] **`agent-text-verifier-prompt.md`** — Gemini Pro prompt + schema-bound
+- [x] **`agent-text-verifier-prompt.md`** — Gemini Pro prompt + schema-bound
       output for DOM-text classification against the advertiser taxonomy.
-- [ ] **`agent-image-verifier-prompt.md`** — Gemini Pro vision prompt over
+      → `features/clusterC/agent-text-verifier-prompt.md`
+- [x] **`agent-image-verifier-prompt.md`** — Gemini Pro vision prompt over
       screenshot batches; same taxonomy, visual modality.
-- [ ] **`agent-video-verifier-prompt.md`** — Gemini Pro vision over sampled
+      → `features/clusterC/agent-image-verifier-prompt.md`
+- [x] **`agent-video-verifier-prompt.md`** — Gemini Pro vision over sampled
       frames + poster; skip path when no video is on the page.
+      → `features/clusterC/agent-video-verifier-prompt.md`
 - [x] **`agent-arbiter-scoring.md`** — disagreement detection, confidence
       blending, `HUMAN_REVIEW` escalation threshold, evidence assembly.
       → `features/clusterC/agent-arbiter-scoring.md`
@@ -76,21 +79,25 @@
 
 ### Cluster D — Surface area & demo
 
-- [ ] **`dashboard-verdict-views.md`** — real views over `AuditStore` next to
+- [x] **`dashboard-verdict-views.md`** — real views over `AuditStore` next to
       the Lobster Trap iframe: verdict timeline, reasons drill-down,
       declared-vs-detected intent diff for the Veea-Award demo moment.
+      → `features/clusterD/dashboard-verdict-views.md`
       *Independent of:* everything else (read-only over `AuditStore`).
-- [ ] **`demo-bidstream-seeding.md`** — recorded bidstream replayer + a
+- [x] **`demo-bidstream-seeding.md`** — recorded bidstream replayer + a
       pre-seeded set of pages (a clean ALLOW, a clean DENY, an ambiguous
       Flash-escalation case, a `HUMAN_REVIEW` arbiter disagreement, a cache
       miss → DENY-then-warm scenario). This **is** the on-stage demo.
+      → `features/clusterD/demo-bidstream-seeding.md`
       *Independent of:* prompt content (replayer drives the gate, not the
       agents directly).
-- [ ] **`lobstertrap-policy-authoring.md`** — replace the starter
+- [x] **`lobstertrap-policy-authoring.md`** — replace the starter
       `policies/lobstertrap.yaml` with real `ALLOW / DENY / LOG /
       HUMAN_REVIEW / QUARANTINE / RATE_LIMIT` rules aligned to the gate's
       verdict vocabulary. Includes the adversarial test against
-      `./lobstertrap test`. *Independent of:* every other engineering row.
+      `./lobstertrap test`.
+      → `features/clusterD/lobstertrap-policy-authoring.md`
+      *Independent of:* every other engineering row.
 
 ---
 
