@@ -1,0 +1,21 @@
+{
+  "name": "scout-ai-hackathon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pre-bid AI ad verification — lablab.ai × TechEx 2026 hackathon entry",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@11.1.2",
+  "scripts": {
+    "typecheck": "pnpm -r exec tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}

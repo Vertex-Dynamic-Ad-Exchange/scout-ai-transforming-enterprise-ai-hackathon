@@ -1,0 +1,15 @@
+node_modules/
+pnpm-lock.yaml
+dist/
+build/
+coverage/
+.pnpm-store/
+
+# User-authored docs — keep manual markdown formatting
+CLAUDE.md
+HACKATHON-CONTEXT.md
+
+# Reference / out-of-tree content (also gitignored)
+features/
+PRPs/
+.claude/
