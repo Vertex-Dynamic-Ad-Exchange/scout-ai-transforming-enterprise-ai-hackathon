@@ -3,9 +3,18 @@
 //   BROWSER_USE_API_KEY=... pnpm --filter @scout/harness run smoke
 //   BROWSER_USE_API_KEY=... pnpm --filter @scout/harness run smoke -- --force-agent
 //
-// --force-agent (PRP-C1): exercises the Agent-mode path live before PRP-C2
-// lands the two-pass orchestrator. Smoke-script only — never a production CLI
-// surface (profiler invokes via opts.forceAgentMode).
+// --force-agent (PRP-C1): exercises the Agent-mode path live; bypasses the
+// two-pass orchestrator. Smoke-script only — never a production CLI surface
+// (profiler invokes via opts.forceAgentMode).
+//
+// PRP-C2 (D5): URL 4 is a known-consent-wall page that exercises the
+// two-pass Browser → Agent fallback on every smoke run. Expected output for
+// URL 4: `mode: "agent"` + warnings includes
+// `consent_wall_handled_via_agent_mode`. If URL 4 returns `mode: "browser"`
+// either the heuristic missed (PRP-C1 consentWall.ts trade) or the page
+// stopped walling (consent banners get A/B-tested off some surfaces) — try
+// another EU news front, update the URL + verification date below, and add a
+// note in the PR.
 //
 // SECURITY: never logs the full PageCapture (domText is up to 256 KiB of
 // arbitrary page content). Logs the structured summary only.
@@ -13,10 +22,16 @@ import { createHarness } from "../src/factory.js";
 
 // Hardcoded — NOT CLI args. The captured set is intentionally locked so the
 // smoke output is comparable across runs. Edit this array in source.
+//
+// URL 4: theguardian.com — verified 2026-05-15 as serving a consent banner
+// matching BANNER_SELECTORS (sourcepoint CMP, `[class*="consent"]`). The
+// front page is the lowest-drift target; article slugs rotate, the homepage
+// shell does not.
 const URLS = [
   "https://en.wikipedia.org/wiki/Page_caching", // static article
   "https://news.ycombinator.com/", // SPA-ish, no <video>
   "https://www.bbc.com/news", // video-heavy news front
+  "https://www.theguardian.com/", // known-consent-wall (PRP-C2 D5)
 ];
 
 // PRP-C1 § smoke: when --force-agent is passed, drive only the static article

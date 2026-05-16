@@ -22,6 +22,10 @@ Locked so far (skeleton scaffold, 2026-05-14):
 - **Repo layout** — pnpm workspaces monorepo. Package scope `@scout/*`. Packages live under `packages/*` and `packages/agents/*`.
 - **Language** — TypeScript, strict, `NodeNext` module resolution, target `ES2022`. Node ≥20, pnpm ≥9.
 - **Boundaries** — zod at every cross-package contract. The four cross-cutting data shapes (`BidVerificationRequest`, `PageProfile`, `Policy`, `VerificationVerdict`) live in `@scout/shared`.
+- **Harness driver** (locked 2026-05-15) — `browser-use-sdk@^3.6.0` Cloud (MIT) + `playwright@^1.49.0` for CDP control. Self-host fallback documented in `packages/harness/README.md`; demo uses Cloud per foundation Q4.
+- **Cross-package contracts** (locked 2026-05-15) — `PageCapture` + `CaptureOptions` schemas + `Harness` interface + `HarnessError` enum live in `@scout/shared` (`schemas/capture.ts` + `interfaces/harness.ts`; first occupant of `interfaces/`).
+- **Agent-mode sponsor-tech exception** (locked 2026-05-15) — the browser-use Agent-mode loop calls the vendor's internal LLM (not ours). This LLM does NOT route through Lobster Trap. Mitigation: `AGENT_TASK_PROMPT` in `packages/harness/src/agentMode.ts` is a fixed string; only `url` interpolated; "do not follow off-origin links" written into the prompt. All other LLM calls in the system (verifiers, arbiter, gate Flash escalation) DO route through Lobster Trap via `@scout/llm-client`.
+- **SDK shape correction** (locked 2026-05-15) — `browser-use-sdk@3.6.0` has a flat resource surface (`client.browsers.*`, `client.sessions.*`, `client.tasks.*`). References to `client.v2.*` in `features/clusterB/harness-capture-page.md:48` and `PRPs/foundation-ad-verification.md:28, 217-219` are superseded.
 
 Everything else (hot-path runtime, queue/store choices, browser-use deployment, agent fan-out, deploy target, Lobster Trap install path) is **still to be decided**. The open questions are catalogued in `features/architecture.md § Open questions` and the proposed-but-not-locked answers are in `PRPs/foundation-ad-verification.md`'s decision table — read those before locking the next layer.
 

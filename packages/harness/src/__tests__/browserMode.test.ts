@@ -21,6 +21,9 @@ vi.mock("playwright", () => ({
 
 import { HarnessError, HarnessException } from "@scout/shared";
 import { createHarness } from "../factory.js";
+import { capturePage as browserModeCapture } from "../browserMode.js";
+import { BrowserUse } from "browser-use-sdk";
+import type { HarnessConfig } from "../config.js";
 
 interface FakePage {
   goto: ReturnType<typeof vi.fn>;
@@ -154,17 +157,29 @@ describe("capturePage — happy path (no video)", () => {
 
 describe("capturePage — consent wall", () => {
   it("throws CONSENT_WALL_UNRESOLVED when detectConsentWall fires, cleans up the session", async () => {
-    // PRP-C1 Task 2: replaces the D4 stub. Consent-wall pages exit Browser
-    // mode loudly so the two-pass orchestrator in PRP-C2 can retry under Agent.
+    // PRP-C1 Task 2: consent-wall pages exit Browser mode loudly so the
+    // two-pass orchestrator (PRP-C2 capture.ts) can retry under Agent.
+    //
+    // PRP-C2: call browserMode directly. The createHarness chain now wraps
+    // browserMode in the orchestrator, which would catch this exact error and
+    // attempt the Agent fallback — and the fallback's observable behavior is
+    // pinned in capture.test.ts T1b/T1f. This test stays focused on
+    // browserMode's own loud-exit contract.
     mocks.create.mockResolvedValue(defaultSession());
     const page = buildPage();
     // First $$ call (BANNER_SELECTORS[0] = "#onetrust-banner-sdk") hits.
     page.$$.mockResolvedValueOnce([{}] as unknown[]);
     mocks.connectOverCDP.mockResolvedValue(buildBrowser(page));
 
+    const sdk = new BrowserUse({ apiKey: "test-key" });
+    const cfg: HarnessConfig = {
+      browserUseApiKey: "test-key",
+      defaultProxyCountry: "US",
+    };
+
     let thrown: unknown;
     try {
-      await createHarness().capturePage("https://example.test/article");
+      await browserModeCapture(sdk, cfg, "https://example.test/article", {});
     } catch (e) {
       thrown = e;
     }

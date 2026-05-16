@@ -4,7 +4,6 @@ import { join } from "node:path";
 import type { BrowserUse } from "browser-use-sdk";
 import { chromium, type Browser } from "playwright";
 import {
-  CaptureOptionsSchema,
   HarnessError,
   HarnessException,
   PageCaptureSchema,
@@ -36,21 +35,19 @@ export async function capturePage(
   sdk: BrowserUse,
   cfg: HarnessConfig,
   url: string,
-  optsIn?: CaptureOptions,
+  opts: CaptureOptions,
 ): Promise<PageCapture> {
-  // 1. Fail-fast on bad options. .strict() in the schema rejects unknown
-  //    keys — silent fallthrough of misspelled `geoLocation` would route
-  //    every capture through the US proxy.
-  const opts = CaptureOptionsSchema.parse(optsIn ?? {});
+  // PRP-C2: options are parsed once in capture.ts (single entry point). This
+  // function trusts the shape — re-parsing would just duplicate work. If a
+  // future caller bypasses capture.ts the type signature still pins the
+  // contract; runtime garbage gets caught at the orchestrator's .strict() parse.
+  //
+  // forceAgentMode routing also lives in capture.ts now. If the flag still
+  // arrives here it's a routing regression upstream; the option is metadata-
+  // only at this layer.
 
-  // PRP-C1 lifts the D5 throw — factory.ts now routes forceAgentMode:true
-  // to captureViaAgent BEFORE this function runs. If the flag still arrives
-  // here it's a routing regression in factory.ts; let the option through as
-  // metadata only and let downstream tests catch it. The two-pass orchestrator
-  // in PRP-C2 will centralize this.
-
-  // 3. URL scheme guard. file://, data:, chrome-extension://, javascript:
-  //    must never reach the cloud session.
+  // URL scheme guard. file://, data:, chrome-extension://, javascript:
+  // must never reach the cloud session.
   let parsed: URL;
   try {
     parsed = new URL(url);
