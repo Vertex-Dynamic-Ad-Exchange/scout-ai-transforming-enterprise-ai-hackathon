@@ -9,9 +9,12 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@scout/shared": "workspace:*"
+    "@scout/shared": "workspace:*",
+    "openai": "^4.68.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/node": "^18.0.0",
     "typescript": "^5.6.3"
   }
 }

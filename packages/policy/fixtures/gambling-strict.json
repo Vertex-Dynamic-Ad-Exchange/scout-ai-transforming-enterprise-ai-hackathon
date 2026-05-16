@@ -1,0 +1,23 @@
+{
+  "id": "policy-gambling-strict",
+  "version": "2026-05-15.1",
+  "advertiserId": "advertiser-family-safe",
+  "rules": [
+    {
+      "id": "deny-gambling-category",
+      "kind": "category",
+      "match": "gambling",
+      "action": "DENY"
+    },
+    {
+      "id": "deny-casino-entity",
+      "kind": "entity",
+      "match": "Atlantic City Casino",
+      "action": "DENY"
+    }
+  ],
+  "escalation": {
+    "ambiguousAction": "DENY",
+    "humanReviewThreshold": 0.6
+  }
+}

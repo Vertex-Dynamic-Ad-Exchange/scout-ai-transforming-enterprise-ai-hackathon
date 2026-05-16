@@ -1,0 +1,23 @@
+{
+  "id": "policy-permissive-baseline",
+  "version": "2026-05-15.1",
+  "advertiserId": "advertiser-exploratory",
+  "rules": [
+    {
+      "id": "allow-news-category",
+      "kind": "category",
+      "match": "news",
+      "action": "ALLOW"
+    },
+    {
+      "id": "allow-business-entity",
+      "kind": "entity",
+      "match": "OpenAI",
+      "action": "ALLOW"
+    }
+  ],
+  "escalation": {
+    "ambiguousAction": "ALLOW",
+    "humanReviewThreshold": 0.8
+  }
+}
