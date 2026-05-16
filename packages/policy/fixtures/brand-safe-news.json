@@ -1,0 +1,29 @@
+{
+  "id": "policy-brand-safe-news",
+  "version": "2026-05-15.1",
+  "advertiserId": "advertiser-news",
+  "rules": [
+    {
+      "id": "allow-news",
+      "kind": "category",
+      "match": "news",
+      "action": "ALLOW"
+    },
+    {
+      "id": "deny-gambling",
+      "kind": "category",
+      "match": "gambling",
+      "action": "DENY"
+    },
+    {
+      "id": "review-political-entity",
+      "kind": "entity",
+      "match": "Political Action Committee",
+      "action": "HUMAN_REVIEW"
+    }
+  ],
+  "escalation": {
+    "ambiguousAction": "HUMAN_REVIEW",
+    "humanReviewThreshold": 0.7
+  }
+}

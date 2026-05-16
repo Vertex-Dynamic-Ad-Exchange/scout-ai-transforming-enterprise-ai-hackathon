@@ -36,28 +36,28 @@
       escalation → fail-closed verdict. Includes the **100-req synthetic
       benchmark** required by foundation Q2 (Node + Fastify vs. Bun + Hono).
       → `features/clusterA/gate-verdict-logic.md`
-      *Independent of:* harness, profiler, dashboard, verifier prompts.
-      *Reads:* `ProfileStore`, `PolicyStore`, `LlmClient`.
+      _Independent of:_ harness, profiler, dashboard, verifier prompts.
+      _Reads:_ `ProfileStore`, `PolicyStore`, `LlmClient`.
 - [x] **`policy-match-evaluation.md`** — implement `policy.match(profile,
-      policy) → PolicyMatchResult`. Pure function, versioned, deterministic.
+    policy) → PolicyMatchResult`. Pure function, versioned, deterministic.
       Includes example advertiser policy fixtures and rule-evaluation unit
       tests.
       → `features/clusterA/policy-match-evaluation.md`
-      *Independent of:* every other row (no LLM, no I/O).
+      _Independent of:_ every other row (no LLM, no I/O).
 
 ### Cluster B — Warm path (a second developer can own end-to-end)
 
 - [x] **`harness-capture-page.md`** — real `capturePage(url, opts) →
-      PageCapture` body via `browser-use-sdk/v2` Browser mode. Resolves the
+    PageCapture` body via `browser-use-sdk/v2` Browser mode. Resolves the
       open license question on the self-hosted harness, picks Cloud vs.
       self-host for the demo, and documents the agent-mode escape hatch.
       → `features/clusterB/harness-capture-page.md`
-      *Independent of:* every verifier (output is a typed `PageCapture`).
+      _Independent of:_ every verifier (output is a typed `PageCapture`).
 - [x] **`profiler-real-loop.md`** — queue consumer, parallel verifier fan-out,
       arbiter, profile commit, TTL handling, and the **Q6 cost trip-wire**
       (drop video → collapse text+image).
       → `features/clusterB/profiler-real-loop.md`
-      *Independent of:* the four agent prompts (each is called through the
+      _Independent of:_ the four agent prompts (each is called through the
       `Verifier` interface — stubs are fine until the prompt PRPs land).
 
 ### Cluster C — Verifier agents (four developers could run in parallel; one prompt per PRP)
@@ -74,7 +74,7 @@
 - [x] **`agent-arbiter-scoring.md`** — disagreement detection, confidence
       blending, `HUMAN_REVIEW` escalation threshold, evidence assembly.
       → `features/clusterC/agent-arbiter-scoring.md`
-      *All four:* independent of each other (each is a pure function from a
+      _All four:_ independent of each other (each is a pure function from a
       typed `PageCapture` slice to `AgentVerdict`/`ArbiterDecision`).
 
 ### Cluster D — Surface area & demo
@@ -93,7 +93,7 @@
       agents directly).
 - [x] **`lobstertrap-policy-authoring.md`** — replace the starter
       `policies/lobstertrap.yaml` with real `ALLOW / DENY / LOG /
-      HUMAN_REVIEW / QUARANTINE / RATE_LIMIT` rules aligned to the gate's
+    HUMAN_REVIEW / QUARANTINE / RATE_LIMIT` rules aligned to the gate's
       verdict vocabulary. Includes the adversarial test against
       `./lobstertrap test`.
       → `features/clusterD/lobstertrap-policy-authoring.md`
