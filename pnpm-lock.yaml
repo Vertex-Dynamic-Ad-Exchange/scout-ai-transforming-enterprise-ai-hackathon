@@ -24,6 +24,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.41)
 
   packages/agents/image-verifier:
     dependencies:
@@ -34,6 +37,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.41)
 
   packages/agents/text-verifier:
     dependencies:
@@ -44,6 +50,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.41)
 
   packages/agents/video-verifier:
     dependencies:
@@ -54,6 +63,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.41)
 
   packages/dashboard:
     dependencies:
