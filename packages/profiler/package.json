@@ -8,10 +8,20 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "dependencies": {
-    "@scout/shared": "workspace:*"
+    "@scout/harness": "workspace:*",
+    "@scout/llm-client": "workspace:*",
+    "@scout/shared": "workspace:*",
+    "@scout/store": "workspace:*",
+    "ulid": "^2.3.0"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "@types/node": "^20.11.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
   }
 }

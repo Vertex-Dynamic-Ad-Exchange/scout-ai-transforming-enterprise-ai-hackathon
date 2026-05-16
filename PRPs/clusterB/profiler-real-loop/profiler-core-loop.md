@@ -398,3 +398,36 @@ description: |
     + slot absent. Coordinate if PRP-D lands first.
   - **R5 — Semaphore tail-latency.** Queue-of-resolvers, not `Promise.race`
     over an array (memory leak).
+
+  ## Discovered During Work (2026-05-16 execution)
+
+  1. **`ProfileStore` + `AuditStore` interfaces filled inline.** D1 +
+     pseudocode import them from `@scout/shared`, but PRP-A D17 punted to
+     foundation and foundation has not executed. PRP-C now lands minimal
+     interfaces at `packages/shared/src/interfaces/{profileStore,auditStore}.ts`
+     (alongside `logger.ts`) and appends three lines to the shared barrel.
+     `AuditStore.put(row: unknown)` per D8; `ProfileStore.{put,get}` keyed
+     `(advertiserId, contentHash)` per PRP-A § Security guardrails. PRP-E
+     swaps `AuditStore.put`'s param to a real `AuditRowSchema`.
+  2. **`handleJob.ts` extracted from `runProfiler.ts`.** With the full
+     pipeline inlined, `runProfiler.ts` lands at ~240 lines — over the
+     200-line cap. Extraction keeps the public surface (`runProfiler` +
+     `createProfiler`) in `runProfiler.ts` (118 lines) and pulls the
+     per-job state machine into `handleJob.ts` (148 lines). Files section
+     updated accordingly.
+  3. **Task 8 fake-timer dropped.** The PRP's `vi.useFakeTimers()` plan
+     interacts badly with vitest 2.1's `AbortSignal.timeout` mocking on
+     this stack — the test hangs in the `for await` loop after timers are
+     restored. Equivalent assertion targets (a)–(e) hold with a short real
+     `PROFILER_VERIFIER_TIMEOUT_MS=50` and real timers; see
+     `runProfiler.integration.test.ts` Task 8.
+  4. **Test-side busy-loop break for nack-no-retryAt.** D13 + PRP-B D5
+     compose into a microtask busy loop on permanent-failure tests
+     (Tasks 10/11/12): the queue re-delivers immediately, the loop fails
+     again, on and on until the test's outer abort fires — thousands of
+     iterations × `vi.fn()` call-array growth = OOM in ~5 minutes. Fix is
+     test-only: `driveUntilFirstAudit` aborts the controller from inside
+     `auditStore.put.mockImplementationOnce`, breaking the cycle on the
+     first observed failure. Production semantics unchanged — PRP-D's
+     backoff + attempt-cap + poison-routing is what removes the loop in
+     prod.

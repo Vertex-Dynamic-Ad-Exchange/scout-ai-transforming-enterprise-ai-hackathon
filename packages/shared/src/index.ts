@@ -10,3 +10,6 @@ export * from "./interfaces/harness.js";
 export * from "./interfaces/verifier.js";
 export * from "./interfaces/arbiter.js";
 export * from "./interfaces/profileQueue.js";
+export * from "./interfaces/logger.js";
+export * from "./interfaces/profileStore.js";
+export * from "./interfaces/auditStore.js";
