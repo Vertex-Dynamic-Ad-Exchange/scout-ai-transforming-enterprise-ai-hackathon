@@ -10,7 +10,7 @@ file × ~6.5× expansion). Each PRP capped at 400 lines.
 
 ## Order (each PRP blocks the next)
 
-- [ ] **PRP-A — `profiler-contracts.md`** (400 lines, confidence 9/10)
+- [x] **PRP-A — `profiler-contracts.md`** (400 lines, confidence 9/10)
       → `PRPs/clusterB/profiler-real-loop/profiler-contracts.md`
       Lands `ProfileJob` + `AgentVerdict` + `ArbiterDecision` schemas
       and `Verifier` + `Arbiter` + `ProfileQueue` interfaces in
@@ -22,7 +22,7 @@ file × ~6.5× expansion). Each PRP capped at 400 lines.
       *Validation gate:* `pnpm --filter @scout/shared test` + `pnpm -r
       exec tsc --noEmit` green.
 
-- [ ] **PRP-B — `profiler-in-memory-queue.md`** (394 lines, confidence 8/10)
+- [x] **PRP-B — `profiler-in-memory-queue.md`** (394 lines, confidence 8/10)
       → `PRPs/clusterB/profiler-real-loop/profiler-in-memory-queue.md`
       Lands `InMemoryProfileQueue` in `@scout/store` — enqueue / consume
       (`AsyncIterableIterator`) / ack / nack / visibility-timeout reclaim
@@ -31,7 +31,7 @@ file × ~6.5× expansion). Each PRP capped at 400 lines.
       `ProfileJob` from `@scout/shared`).
       *Validation gate:* `pnpm --filter @scout/store test` green.
 
-- [ ] **PRP-C — `profiler-core-loop.md`** (400 lines, confidence 7/10)
+- [x] **PRP-C — `profiler-core-loop.md`** (400 lines, confidence 7/10)
       → `PRPs/clusterB/profiler-real-loop/profiler-core-loop.md`
       Lands `createProfiler` + `runProfiler` + `fanout.ts` + `commit.ts`
       + a minimal `Logger` interface in `@scout/shared`. Wires bounded

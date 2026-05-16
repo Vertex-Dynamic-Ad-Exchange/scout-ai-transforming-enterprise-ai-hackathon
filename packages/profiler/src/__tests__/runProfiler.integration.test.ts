@@ -22,6 +22,7 @@ import {
   fakeProfileStore,
   fakeVerifier,
   newQueue,
+  wrapQueueWithNackSpy,
   type FakeArbiter,
   type FakeAuditStore,
   type FakeHarness,
@@ -443,6 +444,28 @@ describe("runProfiler — Lobster Trap observability + DENY propagation", () => 
   });
 });
 
+describe("runProfiler — TTL heuristic wiring (PRP-D Task 8)", () => {
+  it("og:news capture → ttl = 1800 (PRP-D D12 news-or-article path)", async () => {
+    const cap = buildCapture({
+      metadata: { title: null, description: null, ogType: "news", lang: "en" },
+    });
+    const rig = buildRig({ capture: cap });
+    await rig.queue.enqueue(buildJob());
+    await drive(rig, () => rig.profileStore.put.mock.calls.length > 0);
+    const [, profile] = rig.profileStore.put.mock.calls[0]!;
+    expect(profile.ttl).toBe(1_800);
+  });
+
+  it("og:null + non-UGC host → ttl = 21600 (default branch unchanged)", async () => {
+    // Default buildCapture already has ogType: null and url: example.test/article.
+    const rig = buildRig();
+    await rig.queue.enqueue(buildJob());
+    await drive(rig, () => rig.profileStore.put.mock.calls.length > 0);
+    const [, profile] = rig.profileStore.put.mock.calls[0]!;
+    expect(profile.ttl).toBe(21_600);
+  });
+});
+
 describe("runProfiler — schema-conformance sweep (Task 16 sweep)", () => {
   it("emitted PageProfile passes PageProfileSchema.parse independently", async () => {
     const rig = buildRig();
@@ -455,5 +478,200 @@ describe("runProfiler — schema-conformance sweep (Task 16 sweep)", () => {
     expect(profile.evidenceRefs[0]?.kind).toBe("screenshot");
     const videoRefs = profile.evidenceRefs.filter((r) => r.kind === "video_frame");
     expect(videoRefs.length).toBe(2);
+  });
+});
+
+// PRP-D Task 9: trip-wire floor + missing-combined fail-loud + classifyError +
+// DLQ-before-poison-nack (D8).
+describe("runProfiler — PRP-D Task 9 wiring", () => {
+  it("Task 9a: window empty + job.degradationHint='drop_video' → video.verify NOT called", async () => {
+    const rig = buildRig();
+    await rig.queue.enqueue(buildJob({ degradationHint: "drop_video" }));
+    await drive(rig, () => rig.profileStore.put.mock.calls.length > 0);
+    expect(rig.video.verify).not.toHaveBeenCalled();
+    expect(rig.text.verify).toHaveBeenCalledTimes(1);
+    expect(rig.image.verify).toHaveBeenCalledTimes(1);
+  });
+
+  it("Task 9b: collapse_text_image without verifiers.combined → poison + DLQ + nack-poison", async () => {
+    const rig = buildRig();
+    const wrapped = wrapQueueWithNackSpy(rig.queue);
+    const abort = new AbortController();
+    rig.auditStore.put.mockImplementation(async (row) => {
+      // Abort on the DLQ row so the test exits cleanly.
+      if ((row as { kind?: string }).kind === "profile_job_dlq") abort.abort();
+    });
+    const deps: ProfilerDeps = { ...rig.deps, queue: wrapped.queue, signal: abort.signal };
+    const handle = createProfiler(deps);
+    await rig.queue.enqueue(buildJob({ degradationHint: "collapse_text_image" }));
+    await handle.start();
+
+    // Pre-dispatch fail: NO harness.capturePage call.
+    expect(rig.harness.capturePage).not.toHaveBeenCalled();
+    // DLQ audit row present with expected fields.
+    const dlqRow = rig.auditStore.put.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .find((r) => r["kind"] === "profile_job_dlq");
+    expect(dlqRow).toBeDefined();
+    expect(dlqRow!["reason"]).toBe("combined_verifier_unavailable");
+    expect(dlqRow!["advertiserId"]).toBe("adv-1");
+    expect(dlqRow!["jobId"]).toBe("job-1");
+    // Nack-poison fired.
+    expect(wrapped.nack).toHaveBeenCalledTimes(1);
+    expect(wrapped.nack.mock.calls[0]![0].kind).toBe("poison");
+    expect(wrapped.nack.mock.calls[0]![0].detail).toBe("combined_verifier_unavailable");
+  });
+
+  it("Task 9c: BLOCKED @attempt=1 → transient nack (one-retry allowance)", async () => {
+    const rig = buildRig({
+      harness: async () => {
+        throw new Hex(HarnessError.BLOCKED, "consent");
+      },
+    });
+    const wrapped = wrapQueueWithNackSpy(rig.queue);
+    const abort = new AbortController();
+    rig.auditStore.put.mockImplementationOnce(async () => {
+      abort.abort();
+    });
+    const deps: ProfilerDeps = { ...rig.deps, queue: wrapped.queue, signal: abort.signal };
+    const handle = createProfiler(deps);
+    await rig.queue.enqueue(buildJob({ attempt: 1 }));
+    await handle.start();
+
+    expect(wrapped.nack).toHaveBeenCalledTimes(1);
+    const reason = wrapped.nack.mock.calls[0]![0];
+    expect(reason.kind).toBe("transient");
+    expect(reason.detail).toBe("blocked");
+    expect(reason.retryAt).toBeDefined();
+    // No DLQ audit row.
+    const dlq = rig.auditStore.put.mock.calls.find(
+      (c) => (c[0] as { kind?: string }).kind === "profile_job_dlq",
+    );
+    expect(dlq).toBeUndefined();
+  });
+
+  it("Task 9d: BLOCKED @attempt=2 → poison; DLQ audit row called BEFORE nack-poison (D8)", async () => {
+    const rig = buildRig({
+      harness: async () => {
+        throw new Hex(HarnessError.BLOCKED, "consent");
+      },
+    });
+    const wrapped = wrapQueueWithNackSpy(rig.queue);
+    const abort = new AbortController();
+    rig.auditStore.put.mockImplementation(async (row) => {
+      if ((row as { kind?: string }).kind === "profile_job_dlq") abort.abort();
+    });
+    const deps: ProfilerDeps = { ...rig.deps, queue: wrapped.queue, signal: abort.signal };
+    const handle = createProfiler(deps);
+    await rig.queue.enqueue(buildJob({ attempt: 2 }));
+    await handle.start();
+
+    // Nack reason poison.
+    expect(wrapped.nack).toHaveBeenCalledTimes(1);
+    const reason = wrapped.nack.mock.calls[0]![0];
+    expect(reason.kind).toBe("poison");
+    expect(reason.detail).toBe("blocked_after_retry");
+
+    // D8 ordering: DLQ audit invocation < nack invocation.
+    const dlqCallIdx = rig.auditStore.put.mock.calls.findIndex(
+      (c) => (c[0] as { kind?: string }).kind === "profile_job_dlq",
+    );
+    expect(dlqCallIdx).toBeGreaterThanOrEqual(0);
+    const dlqInvocationOrder = rig.auditStore.put.mock.invocationCallOrder[dlqCallIdx]!;
+    const nackInvocationOrder = wrapped.nack.mock.invocationCallOrder[0]!;
+    expect(dlqInvocationOrder).toBeLessThan(nackInvocationOrder);
+  });
+});
+
+// PRP-D Task 10: sentinel `verifier_blackout` (D7). 2-of-3 verifiers fail +
+// arbiter recommends human review → append the sentinel; do NOT replace
+// existing categories.
+describe("runProfiler — PRP-D Task 10 sentinel", () => {
+  it("appends verifier_blackout when humanReviewRecommended && failedCount ≥ 2", async () => {
+    const rig = buildRig({
+      arbiter: () => ({
+        decision: "HUMAN_REVIEW",
+        confidence: 0.6,
+        consensusCategories: [{ label: "real", confidence: 0.6 }],
+        consensusEntities: [],
+        disagreements: [],
+        humanReviewRecommended: true,
+        lobstertrapTraceId: "lt-arb-blackout",
+      }),
+    });
+    // Force 2 verifiers to throw — the synth replacements have
+    // `decision: "HUMAN_REVIEW"` and `lobstertrapTraceId: null`, which is the
+    // `real === 0` signal exception path in handleJob: those count as failed.
+    rig.text.verify.mockRejectedValue(new Error("text down"));
+    rig.image.verify.mockRejectedValue(new Error("image down"));
+    // video still succeeds → real === 1, failedCount === 2.
+
+    await rig.queue.enqueue(buildJob());
+    await drive(rig, () => rig.profileStore.put.mock.calls.length > 0);
+
+    const profile = rig.profileStore.put.mock.calls[0]![1];
+    const labels = profile.categories.map((c) => c.label);
+    expect(labels).toContain("real");
+    expect(labels).toContain("verifier_blackout");
+    const blackout = profile.categories.find((c) => c.label === "verifier_blackout");
+    expect(blackout?.confidence).toBe(1);
+  });
+
+  it("does NOT append verifier_blackout when only 1 verifier failed", async () => {
+    const rig = buildRig({
+      arbiter: () => ({
+        decision: "HUMAN_REVIEW",
+        confidence: 0.6,
+        consensusCategories: [{ label: "real", confidence: 0.6 }],
+        consensusEntities: [],
+        disagreements: [],
+        humanReviewRecommended: true,
+        lobstertrapTraceId: "lt-arb-1",
+      }),
+    });
+    rig.text.verify.mockRejectedValue(new Error("text down"));
+    // image + video succeed → failedCount = 1.
+
+    await rig.queue.enqueue(buildJob());
+    await drive(rig, () => rig.profileStore.put.mock.calls.length > 0);
+
+    const profile = rig.profileStore.put.mock.calls[0]![1];
+    const labels = profile.categories.map((c) => c.label);
+    expect(labels).not.toContain("verifier_blackout");
+  });
+});
+
+// PRP-D Task 11: DLQ row content + security — no raw `capture.domText`.
+describe("runProfiler — PRP-D Task 11 DLQ security", () => {
+  it("attempt=5 + TIMEOUT → poison/max_attempts_exhausted; DLQ row has no domText", async () => {
+    const rig = buildRig({
+      harness: async () => {
+        throw new Hex(HarnessError.TIMEOUT, "slow");
+      },
+    });
+    const wrapped = wrapQueueWithNackSpy(rig.queue);
+    const abort = new AbortController();
+    rig.auditStore.put.mockImplementation(async (row) => {
+      if ((row as { kind?: string }).kind === "profile_job_dlq") abort.abort();
+    });
+    const deps: ProfilerDeps = { ...rig.deps, queue: wrapped.queue, signal: abort.signal };
+    const handle = createProfiler(deps);
+    await rig.queue.enqueue(buildJob({ attempt: 5 }));
+    await handle.start();
+
+    const dlqRow = rig.auditStore.put.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .find((r) => r["kind"] === "profile_job_dlq");
+    expect(dlqRow).toBeDefined();
+    // Required fields (PRP-D Task 11).
+    expect(dlqRow!["kind"]).toBe("profile_job_dlq");
+    expect(dlqRow!["advertiserId"]).toBe("adv-1");
+    expect(dlqRow!["jobId"]).toBe("job-1");
+    expect(dlqRow!["attempt"]).toBe(5);
+    expect(dlqRow!["reason"]).toBe("max_attempts_exhausted");
+    // Security: NEVER includes `capture.domText` (feature line 248).
+    expect(JSON.stringify(dlqRow)).not.toContain("headline + body text");
+    expect(dlqRow).not.toHaveProperty("domText");
+    expect(dlqRow).not.toHaveProperty("capture");
   });
 });

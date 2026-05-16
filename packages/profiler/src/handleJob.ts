@@ -1,12 +1,14 @@
 // PRP-C extraction: `handleJob` + `failJob` split out so `runProfiler.ts` stays
-// under the 200-line cap (PRP-C CLAUDE.md rules + validation gates). Both
-// helpers are internal to `@scout/profiler`; the public surface remains the
-// `runProfiler` / `createProfiler` pair in `runProfiler.ts`.
+// under the 200-line cap. PRP-D wires `chooseDegradation` (pre-dispatch),
+// `classifyError` (nack-classification), the DLQ-before-poison-nack contract,
+// and the `verifier_blackout` sentinel through this layer.
 
 import {
   HarnessException,
   type Arbiter,
+  type ArbiterDecision,
   type AuditStore,
+  type Category,
   type Harness,
   type Logger,
   type NackReason,
@@ -19,13 +21,22 @@ import type { ProfilerConfig } from "./config.js";
 import type { Lru } from "./lru.js";
 import { fanout } from "./fanout.js";
 import { commitProfile, orderedTraceIds, safeAudit } from "./commit.js";
+import { chooseDegradation, costOf, recordSpend, type SpendWindow } from "./costTripwire.js";
+import { classifyError, computeRetryAt } from "./retry.js";
 
 // PRP-C D4: profiler does NOT load `Policy` (would cross gate's tenancy seam).
 const HUMAN_REVIEW_THRESHOLD = 0.7;
 
+// PRP-D D7: 2-of-3 verifiers failing means the page has too little signal for
+// a permissive policy to ALLOW. The category is the signal; the matching deny
+// rule in `permissive-baseline.json` is filed as a follow-up (D11) — without
+// it, the sentinel is a no-op label.
+const SENTINEL_BLACKOUT: Category = { label: "verifier_blackout", confidence: 1 };
+const BLACKOUT_FAIL_THRESHOLD = 2;
+
 export interface HandleJobDeps {
   harness: Harness;
-  verifiers: { text: Verifier; image: Verifier; video: Verifier };
+  verifiers: { text: Verifier; image: Verifier; video: Verifier; combined?: Verifier };
   arbiter: Arbiter;
   profileStore: ProfileStore;
   auditStore: AuditStore;
@@ -43,78 +54,135 @@ export async function handleJob(
   deps: HandleJobDeps,
   cfg: ProfilerConfig,
   seen: Lru<string>,
+  window: SpendWindow,
   tuple: Tuple,
   abortSignal: AbortSignal,
 ): Promise<void> {
   const { job, ack, nack } = tuple;
   const clock = deps.clock ?? Date.now;
   const t0 = clock();
-  // PRP-C D10: LRU keyed on `job.id` (NOT contentHash). Same id → cheap ack;
-  // different id with same content → re-run, cache refresh.
+  const shutdownDriven = abortSignal.aborted;
+
+  // PRP-C D10: LRU keyed on `job.id` (NOT contentHash).
   if (seen.has(job.id)) {
     await ack();
     return;
   }
+
+  // PRP-D Task 9 thread 1+2: window-driven degradation + missing-combined guard.
+  // The window upgrades severity (PRP-D D3 floor); the job-hint never downgrades.
+  const derivedHint = chooseDegradation(window, job.degradationHint, clock(), deps.logger);
+  if (derivedHint === "collapse_text_image" && deps.verifiers.combined === undefined) {
+    // Feature line 265: lazy fail-loud at job-time (not at createProfiler).
+    // Structural misconfiguration — direct poison; no retry would resolve.
+    await failJob(
+      deps,
+      job,
+      nack,
+      {
+        detail: "combined_verifier_unavailable",
+        decisionPath: ["combined_verifier_unavailable"],
+        lobstertrapTraceIds: [],
+        elapsedMs: clock() - t0,
+      },
+      { kind: "poison", detail: "combined_verifier_unavailable" },
+    );
+    return;
+  }
+
   let capture: PageCapture;
   try {
     capture = await deps.harness.capturePage(job.pageUrl, { geo: job.geo });
   } catch (e) {
     if (!(e instanceof HarnessException)) throw e;
-    await failJob(deps, job, nack, {
-      detail: `capture_failed:${e.code}`,
-      decisionPath: ["capture_failed"],
-      lobstertrapTraceIds: [],
-      elapsedMs: clock() - t0,
-    });
+    const reason = classifyError(e, { attempt: job.attempt, shutdownDriven });
+    await failJob(
+      deps,
+      job,
+      nack,
+      {
+        detail: `capture_failed:${e.code}`,
+        decisionPath: ["capture_failed"],
+        lobstertrapTraceIds: [],
+        elapsedMs: clock() - t0,
+      },
+      reason,
+    );
     return;
   }
+
   const verdicts = await fanout({ verifiers: deps.verifiers, logger: deps.logger }, capture, {
     advertiserId: job.advertiserId,
     policyId: job.policyId,
     abortSignal,
     verifierTimeoutMs: cfg.verifierTimeoutMs,
-    degradationHint: job.degradationHint,
+    degradationHint: derivedHint,
   });
+
+  // PRP-D Task 9 thread 3: feed the trip-wire after every verifier round.
+  // Sliding-window (D1) — costs accumulated here drive the NEXT job's hint.
+  const now = clock();
+  for (const v of verdicts) recordSpend(window, now, costOf(v));
+
   const real = verdicts.filter(
     (v) => v.lobstertrapTraceId !== null || v.decision !== "HUMAN_REVIEW",
   ).length;
   if (real === 0) {
-    await failJob(deps, job, nack, {
-      detail: "all_verifiers_failed",
-      decisionPath: ["captured", "fanout_failed"],
-      lobstertrapTraceIds: [],
-      elapsedMs: clock() - t0,
-    });
+    const reason = synthesizeReason(job.attempt, cfg, "all_verifiers_failed");
+    await failJob(
+      deps,
+      job,
+      nack,
+      {
+        detail: "all_verifiers_failed",
+        decisionPath: ["captured", "fanout_failed"],
+        lobstertrapTraceIds: [],
+        elapsedMs: clock() - t0,
+      },
+      reason,
+    );
     return;
   }
+
   const arb = await deps.arbiter.combine(verdicts, capture, {
     advertiserId: job.advertiserId,
     policyId: job.policyId,
     humanReviewThreshold: HUMAN_REVIEW_THRESHOLD,
     abortSignal,
   });
+
+  // PRP-D Task 10 (D7): when the arbiter recommends human review AND ≥2
+  // verifiers failed, append `verifier_blackout` so a permissive advertiser's
+  // `ambiguousAction: ALLOW` does not silently allow a no-signal page.
+  // ADDITION (not replacement) preserves the real arbiter signal.
+  const failedCount = verdicts.length - real;
+  const effectiveArb: ArbiterDecision =
+    arb.humanReviewRecommended && failedCount >= BLACKOUT_FAIL_THRESHOLD
+      ? { ...arb, consensusCategories: [...arb.consensusCategories, SENTINEL_BLACKOUT] }
+      : arb;
+
   try {
     await commitProfile(
       { profileStore: deps.profileStore, auditStore: deps.auditStore, logger: deps.logger },
+      { job, capture, verdicts, arbiter: effectiveArb, elapsedMs: clock() - t0 },
+    );
+  } catch (e) {
+    const reason = classifyError(e, { attempt: job.attempt, shutdownDriven });
+    await failJob(
+      deps,
+      job,
+      nack,
       {
-        job,
-        capture,
-        verdicts,
-        arbiter: arb,
-        ttlDefaultSeconds: cfg.ttlDefaultSeconds,
+        detail: "profile_store_unavailable",
+        decisionPath: ["captured", "fanout", "arbitrated", "commit_failed"],
+        lobstertrapTraceIds: orderedTraceIds(verdicts, effectiveArb),
         elapsedMs: clock() - t0,
       },
+      reason,
     );
-  } catch {
-    await failJob(deps, job, nack, {
-      detail: "profile_store_unavailable",
-      decisionPath: ["captured", "fanout", "arbitrated", "commit_failed"],
-      lobstertrapTraceIds: orderedTraceIds(verdicts, arb),
-      elapsedMs: clock() - t0,
-    });
     return;
   }
-  // Anti-pattern: LRU `seen.set` BEFORE `ack`. Order: commit → ack → LRU.
+  // Order: commit → ack → LRU (PRP-C anti-pattern — never set LRU pre-ack).
   await ack();
   seen.set(job.id);
 }
@@ -126,13 +194,25 @@ interface FailRow {
   elapsedMs: number;
 }
 
-// TODO(PRP-D): backoff + retryAt + attempt cap + poison routing per `detail`.
+function synthesizeReason(attempt: number, cfg: ProfilerConfig, _detail: string): NackReason {
+  // Used when there is no `err` to classify (e.g. all-verifiers-failed). Mirrors
+  // the max-attempts gate in `classifyError` so synthesized failures still poison
+  // when the retry budget runs out.
+  if (attempt >= cfg.maxAttempts) {
+    return { kind: "poison", detail: "max_attempts_exhausted" };
+  }
+  return { kind: "transient", detail: _detail, retryAt: computeRetryAt(attempt) };
+}
+
 async function failJob(
   deps: { auditStore: AuditStore; logger: Logger },
   job: ProfileJob,
   nack: (r: NackReason) => Promise<void>,
   row: FailRow,
+  reason: NackReason,
 ): Promise<void> {
+  // Stage audit — same shape as PRP-C (decisionPath-driven) so existing
+  // dashboards stay green.
   await safeAudit(deps, {
     advertiserId: job.advertiserId,
     jobId: job.id,
@@ -140,5 +220,18 @@ async function failJob(
     decisionPath: row.decisionPath,
     elapsedMs: row.elapsedMs,
   });
-  await nack({ kind: "transient", detail: row.detail });
+  // PRP-D D8: DLQ row strictly BEFORE the poison nack — otherwise a consumer
+  // reclaim can pick up the nack before the audit row commits, and the DLQ
+  // dashboard never sees it. Structured fields ONLY (PRP-D § Security): never
+  // include `capture.domText` — feature line 248.
+  if (reason.kind === "poison") {
+    await safeAudit(deps, {
+      kind: "profile_job_dlq",
+      advertiserId: job.advertiserId,
+      jobId: job.id,
+      attempt: job.attempt,
+      reason: reason.detail,
+    });
+  }
+  await nack(reason);
 }

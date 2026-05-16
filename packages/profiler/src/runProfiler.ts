@@ -9,6 +9,7 @@ import type {
 } from "@scout/shared";
 import { profilerConfig } from "./config.js";
 import { createLru } from "./lru.js";
+import { createSpendWindow } from "./costTripwire.js";
 import { handleJob } from "./handleJob.js";
 
 /** PRP-C D1 — plug-and-play DI seam. Field order locked here. */
@@ -88,6 +89,9 @@ export async function runProfiler(deps: ProfilerDeps): Promise<void> {
 async function runProfilerLoop(deps: ProfilerDeps, abort: AbortController): Promise<void> {
   const cfg = profilerConfig();
   const seen = createLru<string>(cfg.processedLruSize);
+  // PRP-D Task 9 thread 1: one window per profiler process — shared across
+  // every `handleJob` so the rolling sum (D1) accumulates across jobs.
+  const window = createSpendWindow();
   const slot = createSemaphore(cfg.concurrency);
   const inflight = new Set<Promise<void>>();
   try {
@@ -98,7 +102,7 @@ async function runProfilerLoop(deps: ProfilerDeps, abort: AbortController): Prom
       await slot.acquire();
       // Catch-all so unexpected throws don't surface as unhandledRejection
       // (Task 8 asserts this explicitly).
-      const p: Promise<void> = handleJob(deps, cfg, seen, tuple, abort.signal)
+      const p: Promise<void> = handleJob(deps, cfg, seen, window, tuple, abort.signal)
         .catch((e: unknown) =>
           deps.logger.error({
             event: "handle_job_unexpected_error",

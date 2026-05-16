@@ -12,6 +12,7 @@ import {
   type ProfileStore,
   type VerifierKind,
 } from "@scout/shared";
+import { computeTtl } from "./ttlPolicy.js";
 
 export interface CommitDeps {
   profileStore: ProfileStore;
@@ -24,7 +25,6 @@ export interface CommitCtx {
   capture: PageCapture;
   verdicts: AgentVerdict[];
   arbiter: ArbiterDecision;
-  ttlDefaultSeconds: number;
   elapsedMs: number;
 }
 
@@ -49,7 +49,7 @@ export function orderedTraceIds(
 }
 
 export async function commitProfile(deps: CommitDeps, ctx: CommitCtx): Promise<PageProfile> {
-  const { job, capture, verdicts, arbiter, ttlDefaultSeconds, elapsedMs } = ctx;
+  const { job, capture, verdicts, arbiter, elapsedMs } = ctx;
   const screenshots: EvidenceRef[] = capture.screenshots.map((s) => ({
     // TODO(PRP-E): tenant-namespace URI rewrite per feature line 89.
     kind: "screenshot" as const,
@@ -68,8 +68,7 @@ export async function commitProfile(deps: CommitDeps, ctx: CommitCtx): Promise<P
     detectedEntities: arbiter.consensusEntities,
     evidenceRefs: [...screenshots, ...videoFrames],
     capturedAt: capture.capturedAt,
-    // TODO(PRP-D): TTL heuristic table (feature 93-97); flat default for now.
-    ttl: ttlDefaultSeconds,
+    ttl: computeTtl(capture),
   };
   PageProfileSchema.parse(profile); // defense-in-depth (Task 16 sweep).
   observeTraceGaps(deps.logger, verdicts, job);

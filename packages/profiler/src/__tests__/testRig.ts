@@ -19,10 +19,13 @@ import {
   type AuditStore,
   type Harness,
   type Logger,
+  type NackReason,
   type PageCapture,
   type PageProfile,
   type ProfileJob,
+  type ProfileQueue,
   type ProfileStore,
+  type QueueDelivery,
   type Verifier,
   type VerifierKind,
 } from "@scout/shared";
@@ -112,6 +115,50 @@ export function fakeLogger(): FakeLogger {
 // against the queue's DLQ as well.
 export function newQueue(): InMemoryProfileQueue {
   return new InMemoryProfileQueue();
+}
+
+/**
+ * Wraps a ProfileQueue with a `nack` spy on every yielded delivery. PRP-D
+ * Task 9 needs `mock.invocationCallOrder` between `auditStore.put` and the
+ * per-delivery `nack`, which the underlying impl creates as a closure per
+ * message (not a method on the queue object).
+ */
+export function wrapQueueWithNackSpy(q: ProfileQueue): {
+  queue: ProfileQueue;
+  nack: Mock<(reason: NackReason) => Promise<void>>;
+} {
+  const nack = vi.fn(async (_r: NackReason) => {});
+  const wrapped: ProfileQueue = {
+    enqueue: (job) => q.enqueue(job),
+    consume(opts) {
+      const inner = q.consume(opts);
+      const iter: AsyncIterableIterator<QueueDelivery> = {
+        [Symbol.asyncIterator]() {
+          return iter;
+        },
+        async next() {
+          const r = await inner.next();
+          if (r.done) return r;
+          const inner_tuple = r.value;
+          const tuple: QueueDelivery = {
+            job: inner_tuple.job,
+            ack: () => inner_tuple.ack(),
+            nack: async (reason) => {
+              await nack(reason);
+              await inner_tuple.nack(reason);
+            },
+          };
+          return { value: tuple, done: false };
+        },
+        async return(value) {
+          if (inner.return) return inner.return(value);
+          return { value, done: true };
+        },
+      };
+      return iter;
+    },
+  };
+  return { queue: wrapped, nack };
 }
 
 const VALID_HASH = "a".repeat(64);
