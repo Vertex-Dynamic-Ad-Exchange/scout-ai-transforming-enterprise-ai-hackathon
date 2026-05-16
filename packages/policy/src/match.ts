@@ -73,7 +73,9 @@ export function match(profile: PageProfile, policy: Policy): PolicyMatchResult {
       ? 0
       : noisyOr(winningFiredRules.map((rule) => rule.signalConfidence));
 
-  const firedRules = [...winningFiredRules].sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+  const firedRules = [...winningFiredRules].sort((a, b) =>
+    a.ruleId < b.ruleId ? -1 : a.ruleId > b.ruleId ? 1 : 0,
+  );
 
   const result: PolicyMatchResult = {
     decision,

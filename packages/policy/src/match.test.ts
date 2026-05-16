@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PageProfile, Policy } from "@scout/shared";
 import { PolicyMatchResultSchema, PolicySchema } from "@scout/shared";
 import { CONFIDENCE_FLOOR, match } from "./match.js";
@@ -87,6 +87,20 @@ describe("policy match", () => {
     expect(out.decision).toBe("HUMAN_REVIEW");
   });
 
+  it("resolves ALLOW when only ALLOW rules fire (precedence happy path)", () => {
+    const policy: Policy = {
+      ...basePolicy,
+      rules: [
+        { id: "allow-news", kind: "category", match: "news", action: "ALLOW" },
+        { id: "allow-openai", kind: "entity", match: "OpenAI", action: "ALLOW" },
+      ],
+    };
+    const out = match(baseProfile, policy);
+    expect(out.decision).toBe("ALLOW");
+    expect(out.confidence).toBeCloseTo(0.98, 6);
+    expect(out.firedRules).toHaveLength(2);
+  });
+
   it.each(["ALLOW", "DENY", "HUMAN_REVIEW"] as const)(
     "uses ambiguousAction %s when no rule fires",
     (ambiguousAction) => {
@@ -149,17 +163,48 @@ describe("policy match", () => {
     expect(third).toEqual(first);
   });
 
-  it("sorts firedRules lexicographically by ruleId", () => {
+  it("sorts firedRules lexicographically by ruleId across adversarial names", () => {
     const policy: Policy = {
       ...basePolicy,
       rules: [
-        { id: "z-rule", kind: "category", match: "news", action: "ALLOW" },
-        { id: "a-rule", kind: "entity", match: "OpenAI", action: "ALLOW" },
-        { id: "m-rule", kind: "category", match: "news", action: "ALLOW" },
+        { id: "rule-10", kind: "category", match: "news", action: "ALLOW" },
+        { id: "Rule-A", kind: "entity", match: "OpenAI", action: "ALLOW" },
+        { id: "rule-2", kind: "category", match: "news", action: "ALLOW" },
+        { id: "rule-Z", kind: "entity", match: "OpenAI", action: "ALLOW" },
+        { id: "rule-a", kind: "category", match: "news", action: "ALLOW" },
       ],
     };
     const out = match(baseProfile, policy);
-    expect(out.firedRules.map((rule) => rule.ruleId)).toEqual(["a-rule", "m-rule", "z-rule"]);
+    expect(out.firedRules.map((rule) => rule.ruleId)).toEqual([
+      "Rule-A",
+      "rule-10",
+      "rule-2",
+      "rule-Z",
+      "rule-a",
+    ]);
+  });
+
+  it("returns ambiguousAction with zero confidence when policy.rules is empty", () => {
+    const policy: Policy = {
+      ...basePolicy,
+      rules: [],
+      escalation: { ambiguousAction: "DENY", humanReviewThreshold: 0.7 },
+    };
+    const out = match(baseProfile, policy);
+    expect(out.decision).toBe("DENY");
+    expect(out.confidence).toBe(0);
+    expect(out.firedRules).toEqual([]);
+  });
+
+  it("does not read process.env during match evaluation", () => {
+    const envSpy = vi.spyOn(process, "env", "get");
+    try {
+      match(baseProfile, basePolicy);
+      match(baseProfile, withRule("category", "DENY"));
+    } finally {
+      envSpy.mockRestore();
+    }
+    expect(envSpy).not.toHaveBeenCalled();
   });
 
   it("does not fire creative_tag rules from category/entity strings", () => {

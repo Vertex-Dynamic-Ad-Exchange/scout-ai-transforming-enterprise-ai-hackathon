@@ -1,6 +1,18 @@
+import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import { z } from "zod";
 import { llmConfig } from "./config.js";
+
+export class LlmChatError extends Error {
+  readonly lobstertrapTraceId: string;
+
+  constructor(message: string, lobstertrapTraceId: string, cause: unknown) {
+    super(message);
+    this.name = "LlmChatError";
+    this.lobstertrapTraceId = lobstertrapTraceId;
+    this.cause = cause;
+  }
+}
 
 export const GEMINI_FLASH_MODEL = "gemini-2.5-flash"; // pinned — never use -latest
 
@@ -86,6 +98,9 @@ export function createLlmClient(): LlmClient {
 
   return {
     async chat(args: LlmChatArgs, intent: LobstertrapDeclaredIntent): Promise<LlmChatResult> {
+      // Reserved before the call so ambiguous-path verdicts always have an audit trace,
+      // even when the request aborts or errors before Lobster Trap metadata is captured.
+      const fallbackTraceId = randomUUID();
       // Per-call client to isolate capture state across concurrent requests
       const { oai, getCapture } = buildCapturingClient(cfg.GEMINI_API_KEY, baseURL);
 
@@ -100,24 +115,29 @@ export function createLlmClient(): LlmClient {
       if (args.response_format) requestBody.response_format = args.response_format;
       if (args.max_tokens) requestBody.max_tokens = args.max_tokens;
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      const res = await oai.chat.completions.create(requestBody, {
-        signal: args.signal,
-      });
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+        const res = await oai.chat.completions.create(requestBody, {
+          signal: args.signal,
+        });
 
-      const ltMeta = getCapture();
+        const ltMeta = getCapture();
 
-      return {
-        content: res.choices[0]?.message?.content ?? "",
-        lobstertrapTraceId: ltMeta?.request_id ?? null,
-        verdict: ltMeta?.verdict ?? "ALLOW",
-        usage: res.usage
-          ? {
-              prompt_tokens: res.usage.prompt_tokens,
-              completion_tokens: res.usage.completion_tokens,
-            }
-          : null,
-      };
+        return {
+          content: res.choices[0]?.message?.content ?? "",
+          lobstertrapTraceId: ltMeta?.request_id ?? fallbackTraceId,
+          verdict: ltMeta?.verdict ?? "ALLOW",
+          usage: res.usage
+            ? {
+                prompt_tokens: res.usage.prompt_tokens,
+                completion_tokens: res.usage.completion_tokens,
+              }
+            : null,
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unknown LLM error";
+        throw new LlmChatError(message, fallbackTraceId, err);
+      }
     },
 
     async healthcheck(): Promise<

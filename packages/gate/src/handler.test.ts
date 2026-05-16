@@ -25,6 +25,8 @@ describe("POST /verify — happy paths", () => {
     expect(res.statusCode).toBe(200);
     expect(body.decision).toBe("ALLOW");
     expect(body.lobstertrapTraceId).toBeNull();
+    expect(body.reasons.some((r) => r.kind === "profile_signal" && r.ref === "news")).toBe(true);
+    expect(body.reasons.some((r) => r.kind === "policy_rule" && r.ref === "r1")).toBe(true);
     expect(deps.llmClient.chat).not.toHaveBeenCalled();
   });
 
@@ -38,6 +40,7 @@ describe("POST /verify — happy paths", () => {
     const body = res.json<VerificationVerdict>();
     expect(res.statusCode).toBe(200);
     expect(body.decision).toBe("DENY");
+    expect(body.reasons.some((r) => r.kind === "profile_signal" && r.ref === "news")).toBe(true);
     expect(body.reasons.some((r) => r.kind === "policy_rule" && r.ref === "r1")).toBe(true);
     expect(deps.llmClient.chat).not.toHaveBeenCalled();
   });

@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import type { LlmClient } from "@scout/llm-client";
+import { LlmChatError } from "@scout/llm-client";
 import type { PageProfile, Policy, Decision, Reason } from "@scout/shared";
 
 const ESCALATION_MODEL = "gemini-2.5-flash"; // pinned — never use -latest
@@ -7,7 +9,7 @@ const FLASH_MAX_TOKENS = 32; // only need {"decision":"ALLOW"} or {"decision":"D
 
 export interface EscalationResult {
   decision: Decision;
-  lobstertrapTraceId: string | null;
+  lobstertrapTraceId: string;
   reasons: Reason[];
 }
 
@@ -15,6 +17,7 @@ export async function escalateToFlash(
   llmClient: LlmClient,
   profile: PageProfile,
   policy: Policy,
+  handlerAbort?: AbortSignal,
 ): Promise<EscalationResult> {
   // Structured JSON — never interpolate profile text. Prompt-injection defense.
   const profileSignals = {
@@ -24,6 +27,11 @@ export async function escalateToFlash(
   const policyContext = {
     rules: policy.rules.map((r) => ({ kind: r.kind, match: r.match, action: r.action })),
   };
+
+  const abortSignals: AbortSignal[] = [AbortSignal.timeout(FLASH_TIMEOUT_MS)];
+  if (handlerAbort !== undefined) {
+    abortSignals.push(handlerAbort);
+  }
 
   let result: Awaited<ReturnType<LlmClient["chat"]>>;
   try {
@@ -42,7 +50,7 @@ export async function escalateToFlash(
         ],
         response_format: { type: "json_object" },
         max_tokens: FLASH_MAX_TOKENS,
-        signal: AbortSignal.timeout(FLASH_TIMEOUT_MS),
+        signal: AbortSignal.any(abortSignals),
       },
       {
         declared_intent: "brand-safety-flash-escalation",
@@ -51,14 +59,21 @@ export async function escalateToFlash(
       },
     );
   } catch (err: unknown) {
+    const lobstertrapTraceId =
+      err instanceof LlmChatError ? err.lobstertrapTraceId : randomUUID();
     const isAbort = err instanceof Error && err.name === "AbortError";
+    const isTimeout =
+      isAbort ||
+      (err instanceof LlmChatError &&
+        err.cause instanceof Error &&
+        err.cause.name === "AbortError");
     return {
       decision: "DENY",
-      lobstertrapTraceId: null,
+      lobstertrapTraceId,
       reasons: [
         {
           kind: "fail_closed",
-          ref: isAbort ? "flash_timeout" : "lobstertrap_unavailable",
+          ref: isTimeout ? "flash_timeout" : "lobstertrap_unavailable",
           detail: err instanceof Error ? err.message : "Unknown Flash error",
         },
       ],
@@ -69,7 +84,7 @@ export async function escalateToFlash(
   if (result.verdict === "DENY" || result.verdict === "QUARANTINE") {
     return {
       decision: "DENY",
-      lobstertrapTraceId: result.lobstertrapTraceId,
+      lobstertrapTraceId: result.lobstertrapTraceId ?? randomUUID(),
       reasons: [
         {
           kind: "fail_closed",
@@ -98,7 +113,7 @@ export async function escalateToFlash(
 
   return {
     decision: modelDecision,
-    lobstertrapTraceId: result.lobstertrapTraceId,
+    lobstertrapTraceId: result.lobstertrapTraceId ?? randomUUID(),
     reasons: [
       {
         kind: "profile_signal",

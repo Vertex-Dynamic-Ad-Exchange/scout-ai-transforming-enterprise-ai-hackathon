@@ -22,6 +22,16 @@ function isTtlExpired(profile: PageProfile): boolean {
   return Date.now() > new Date(profile.capturedAt).getTime() + profile.ttl * 1000;
 }
 
+function hasPriorArbiterDisagreement(profile: PageProfile): boolean {
+  return profile.evidenceRefs.some((ref) => ref.kind === "dom_snippet");
+}
+
+function requestAbortSignal(req: FastifyRequest): AbortSignal {
+  const controller = new AbortController();
+  req.raw.once("close", () => controller.abort());
+  return controller.signal;
+}
+
 export function createHandler(deps: GateDeps) {
   return async function handler(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const start = Date.now();
@@ -53,6 +63,25 @@ export function createHandler(deps: GateDeps) {
         return;
       }
 
+      if (hasPriorArbiterDisagreement(profile)) {
+        verdict = assembleVerdict({
+          decision: "HUMAN_REVIEW",
+          reasons: [
+            {
+              kind: "arbiter_disagreement",
+              ref: "prior_arbiter_review",
+              detail: "Profile carries prior arbiter disagreement evidence (dom_snippet)",
+            },
+          ],
+          profileId: profile.id,
+          policyVersion: "",
+          latencyMs: Date.now() - start,
+          lobstertrapTraceId: null,
+        });
+        await reply.send(verdict);
+        return;
+      }
+
       // MUST be tenant-scoped — never PolicyStore.get(policyId) without advertiserId
       const policy = await deps.policyStore.get(body.policyId, body.advertiserId);
       if (policy === null) {
@@ -68,7 +97,7 @@ export function createHandler(deps: GateDeps) {
       if (!isAmbiguous && matchResult.decision !== "HUMAN_REVIEW") {
         verdict = assembleVerdict({
           decision: matchResult.decision,
-          reasons: buildReasonsFromMatch(matchResult),
+          reasons: buildReasonsFromMatch(profile, policy, matchResult),
           profileId: profile.id,
           policyVersion: policy.version,
           latencyMs: Date.now() - start,
@@ -85,7 +114,7 @@ export function createHandler(deps: GateDeps) {
         verdict = assembleVerdict({
           decision: "HUMAN_REVIEW",
           reasons: [
-            ...buildReasonsFromMatch(matchResult),
+            ...buildReasonsFromMatch(profile, policy, matchResult),
             {
               kind: "arbiter_disagreement",
               ref: "policy_escalation",
@@ -101,11 +130,16 @@ export function createHandler(deps: GateDeps) {
         return;
       }
 
-      const escalation = await escalateToFlash(deps.llmClient, profile, policy);
+      const escalation = await escalateToFlash(
+        deps.llmClient,
+        profile,
+        policy,
+        requestAbortSignal(req),
+      );
       // Escalation reasons first so fail_closed/lobstertrap surfaces at index 0
       verdict = assembleVerdict({
         decision: escalation.decision,
-        reasons: [...escalation.reasons, ...buildReasonsFromMatch(matchResult)],
+        reasons: [...escalation.reasons, ...buildReasonsFromMatch(profile, policy, matchResult)],
         profileId: profile.id,
         policyVersion: policy.version,
         latencyMs: Date.now() - start,
