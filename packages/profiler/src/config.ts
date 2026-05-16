@@ -27,6 +27,13 @@ export interface ProfilerConfig {
   /** Grace period for in-flight jobs on `stop()`. */
   readonly shutdownGraceMs: number;
 
+  /**
+   * PRP-E D8: hard-kill ceiling beyond `shutdownGraceMs`. After grace, in-flight
+   * jobs are force-nacked-transient (`detail: "shutdown"`); this is the cap
+   * `stop()` waits for those nacks to settle before resolving regardless.
+   */
+  readonly shutdownHardKillMs: number;
+
   /** PRP-D D1: sliding-window length for the cost trip-wire. */
   readonly costWindowMs: number;
 
@@ -59,6 +66,7 @@ const DEFAULTS: ProfilerConfig = {
   ttlDefaultSeconds: 21_600,
   visibilityTimeoutMs: 90_000,
   shutdownGraceMs: 30_000,
+  shutdownHardKillMs: 5_000,
   costWindowMs: 60_000,
   costWindowSoft: 8_000,
   costWindowHard: 16_000,
@@ -90,6 +98,10 @@ export function profilerConfig(): ProfilerConfig {
       DEFAULTS.visibilityTimeoutMs,
     ),
     shutdownGraceMs: readPositiveInt("PROFILER_SHUTDOWN_GRACE_MS", DEFAULTS.shutdownGraceMs),
+    shutdownHardKillMs: readPositiveInt(
+      "PROFILER_SHUTDOWN_HARD_KILL_MS",
+      DEFAULTS.shutdownHardKillMs,
+    ),
     costWindowMs: readPositiveInt("PROFILER_COST_WINDOW_MS", DEFAULTS.costWindowMs),
     costWindowSoft: readPositiveInt("PROFILER_COST_WINDOW_SOFT", DEFAULTS.costWindowSoft),
     costWindowHard: readPositiveInt("PROFILER_COST_WINDOW_HARD", DEFAULTS.costWindowHard),

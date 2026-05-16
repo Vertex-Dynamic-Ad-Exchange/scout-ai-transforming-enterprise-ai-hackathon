@@ -11,6 +11,8 @@ const ENV_KEYS = [
   "PROFILER_TTL_DEFAULT_SECONDS",
   "PROFILER_VISIBILITY_TIMEOUT_MS",
   "PROFILER_SHUTDOWN_GRACE_MS",
+  // PRP-E addition — shutdown hard-kill ceiling
+  "PROFILER_SHUTDOWN_HARD_KILL_MS",
   // PRP-D additions — trip-wire + TTL heuristic + retry
   "PROFILER_COST_WINDOW_MS",
   "PROFILER_COST_WINDOW_SOFT",
@@ -42,6 +44,7 @@ describe("profilerConfig()", () => {
       expect(cfg.ttlDefaultSeconds).toBe(21_600);
       expect(cfg.visibilityTimeoutMs).toBe(90_000);
       expect(cfg.shutdownGraceMs).toBe(30_000);
+      expect(cfg.shutdownHardKillMs).toBe(5_000);
       // PRP-D additions
       expect(cfg.costWindowMs).toBe(60_000);
       expect(cfg.costWindowSoft).toBe(8_000);

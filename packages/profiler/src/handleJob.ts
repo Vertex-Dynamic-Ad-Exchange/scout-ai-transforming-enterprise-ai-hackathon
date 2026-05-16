@@ -23,6 +23,7 @@ import { fanout } from "./fanout.js";
 import { commitProfile, orderedTraceIds, safeAudit } from "./commit.js";
 import { chooseDegradation, costOf, recordSpend, type SpendWindow } from "./costTripwire.js";
 import { classifyError, computeRetryAt } from "./retry.js";
+import type { ShutdownState } from "./runProfiler.js";
 
 // PRP-C D4: profiler does NOT load `Policy` (would cross gate's tenancy seam).
 const HUMAN_REVIEW_THRESHOLD = 0.7;
@@ -57,13 +58,15 @@ export async function handleJob(
   window: SpendWindow,
   tuple: Tuple,
   abortSignal: AbortSignal,
+  shutdownState?: ShutdownState,
 ): Promise<void> {
   const { job, ack, nack } = tuple;
   const clock = deps.clock ?? Date.now;
   const t0 = clock();
   const shutdownDriven = abortSignal.aborted;
 
-  // PRP-C D10: LRU keyed on `job.id` (NOT contentHash).
+  // PRP-C D10: LRU keyed on `job.id` (NOT contentHash). Ack is safe even on the
+  // shutdown path: an already-processed job has nothing to retry.
   if (seen.has(job.id)) {
     await ack();
     return;
@@ -110,6 +113,10 @@ export async function handleJob(
     );
     return;
   }
+  if (shutdownState?.gracePassed) {
+    await nack({ kind: "transient", detail: "shutdown" });
+    return;
+  }
 
   const verdicts = await fanout({ verifiers: deps.verifiers, logger: deps.logger }, capture, {
     advertiserId: job.advertiserId,
@@ -144,6 +151,11 @@ export async function handleJob(
     return;
   }
 
+  if (shutdownState?.gracePassed) {
+    await nack({ kind: "transient", detail: "shutdown" });
+    return;
+  }
+
   const arb = await deps.arbiter.combine(verdicts, capture, {
     advertiserId: job.advertiserId,
     policyId: job.policyId,
@@ -160,6 +172,11 @@ export async function handleJob(
     arb.humanReviewRecommended && failedCount >= BLACKOUT_FAIL_THRESHOLD
       ? { ...arb, consensusCategories: [...arb.consensusCategories, SENTINEL_BLACKOUT] }
       : arb;
+
+  if (shutdownState?.gracePassed) {
+    await nack({ kind: "transient", detail: "shutdown" });
+    return;
+  }
 
   try {
     await commitProfile(
@@ -180,6 +197,14 @@ export async function handleJob(
       },
       reason,
     );
+    return;
+  }
+  // PRP-E Task 4 / D8: final at-least-once gate. If grace expired between
+  // commit and ack, the queue keeps the lease and re-delivery is safe — the
+  // LRU short-circuit catches a re-run (and ProfileStore.put is idempotent
+  // by (advertiserId, contentHash) anyway). NEVER ack on the shutdown path.
+  if (shutdownState?.gracePassed) {
+    await nack({ kind: "transient", detail: "shutdown" });
     return;
   }
   // Order: commit → ack → LRU (PRP-C anti-pattern — never set LRU pre-ack).
@@ -231,6 +256,9 @@ async function failJob(
       jobId: job.id,
       attempt: job.attempt,
       reason: reason.detail,
+      // PRP-E D5: DLQ row terminal decisionPath. The preceding stage row
+      // tells you WHERE the job failed; this row tells you WHERE IT WENT.
+      decisionPath: ["dlq"],
     });
   }
   await nack(reason);

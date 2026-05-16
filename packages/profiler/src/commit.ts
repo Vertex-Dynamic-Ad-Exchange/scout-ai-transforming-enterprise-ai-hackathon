@@ -33,6 +33,38 @@ export interface CommitCtx {
 // attempted-but-trace-missing slots (Task 14 makes the gap observable).
 const KIND_ORDER: VerifierKind[] = ["text", "image", "video"];
 
+/**
+ * PRP-E D1/D2: tenant-scope an evidence URI emitted by the harness so that
+ * `(advertiserId, contentHash)` collisions across advertisers map to disjoint
+ * URIs (feature line 247 — regression here is a cross-tenant disclosure bug).
+ *
+ * Input shape from harness is `file:///tmp/scout-evidence/{contentHash}/{idx}.{ext}`
+ * (or any URI whose last path segment is the desired filename). Output is
+ * `evidence/{advertiserId}/{contentHash}/{filename}`. Pure string substitution;
+ * extension preserved.
+ *
+ * Idempotent on same-advertiser already-namespaced input (D2). Throws on a
+ * different-advertiser already-namespaced input — that's a cross-tenant
+ * assignment bug, fail loud.
+ */
+export function rewriteEvidenceUri(uri: string, advertiserId: string, contentHash: string): string {
+  if (advertiserId.length === 0) {
+    throw new Error("evidence URI rewrite: advertiserId is required");
+  }
+  const selfPrefix = `evidence/${advertiserId}/`;
+  if (uri.startsWith(selfPrefix)) return uri;
+  if (uri.startsWith("evidence/")) {
+    throw new Error("evidence URI namespace conflict");
+  }
+  const path = uri.split("?")[0]!.split("#")[0]!;
+  const lastSlash = path.lastIndexOf("/");
+  const filename = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+  if (filename.length === 0) {
+    throw new Error("evidence URI rewrite: no filename in URI");
+  }
+  return `evidence/${advertiserId}/${contentHash}/${filename}`;
+}
+
 export function orderedTraceIds(
   verdicts: AgentVerdict[],
   arbiter: ArbiterDecision,
@@ -50,15 +82,17 @@ export function orderedTraceIds(
 
 export async function commitProfile(deps: CommitDeps, ctx: CommitCtx): Promise<PageProfile> {
   const { job, capture, verdicts, arbiter, elapsedMs } = ctx;
+  // PRP-E Task 2 (D1): tenant-scope every evidence URI on commit. The boundary
+  // is pinned here so `PageProfileSchema.parse` below sees the rewritten URI;
+  // any earlier site lets unrewritten URIs leak into the audit row + dashboard
+  // tenant filter (PRP-E § Anti-patterns).
   const screenshots: EvidenceRef[] = capture.screenshots.map((s) => ({
-    // TODO(PRP-E): tenant-namespace URI rewrite per feature line 89.
     kind: "screenshot" as const,
-    uri: s.uri,
+    uri: rewriteEvidenceUri(s.uri, job.advertiserId, capture.contentHash),
   }));
   const videoFrames: EvidenceRef[] = capture.videoSamples.map((v) => ({
-    // TODO(PRP-E): tenant-namespace URI rewrite per feature line 89.
     kind: "video_frame" as const,
-    uri: v.uri,
+    uri: rewriteEvidenceUri(v.uri, job.advertiserId, capture.contentHash),
   }));
   const profile: PageProfile = {
     id: ulid(),
@@ -71,7 +105,7 @@ export async function commitProfile(deps: CommitDeps, ctx: CommitCtx): Promise<P
     ttl: computeTtl(capture),
   };
   PageProfileSchema.parse(profile); // defense-in-depth (Task 16 sweep).
-  observeTraceGaps(deps.logger, verdicts, job);
+  observeTraceGaps(deps.logger, verdicts, arbiter, job);
   const traceIds = orderedTraceIds(verdicts, arbiter);
   await deps.profileStore.put(job.advertiserId, profile); // may throw → handleJob catches.
   await safeAudit(deps, {
@@ -85,7 +119,12 @@ export async function commitProfile(deps: CommitDeps, ctx: CommitCtx): Promise<P
   return profile;
 }
 
-function observeTraceGaps(logger: Logger, verdicts: AgentVerdict[], job: ProfileJob): void {
+function observeTraceGaps(
+  logger: Logger,
+  verdicts: AgentVerdict[],
+  arbiter: ArbiterDecision,
+  job: ProfileJob,
+): void {
   for (const v of verdicts) {
     if (v.lobstertrapTraceId !== null) continue;
     if (v.decision === "HUMAN_REVIEW") continue; // synth placeholder (D12) — already logged at fanout.
@@ -94,6 +133,18 @@ function observeTraceGaps(logger: Logger, verdicts: AgentVerdict[], job: Profile
     logger.warn({
       event: "lobstertrap_trace_missing",
       verifier: v.verifier,
+      jobId: job.id,
+      advertiserId: job.advertiserId,
+    });
+    logger.info({ event: "metric", name: "lobstertrap_trace_missing_total", value: 1 });
+  }
+  // PRP-E D4: arbiter null counts toward the same counter. The Veea audit
+  // claim is the END-TO-END chain; a missing arbiter trace is just as
+  // sponsor-tech-broken as a missing verifier trace.
+  if (arbiter.lobstertrapTraceId === null) {
+    logger.warn({
+      event: "lobstertrap_trace_missing",
+      verifier: "arbiter",
       jobId: job.id,
       advertiserId: job.advertiserId,
     });

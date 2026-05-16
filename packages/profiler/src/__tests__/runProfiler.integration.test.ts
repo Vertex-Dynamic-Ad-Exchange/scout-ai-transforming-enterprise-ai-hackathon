@@ -675,3 +675,51 @@ describe("runProfiler — PRP-D Task 11 DLQ security", () => {
     expect(dlqRow).not.toHaveProperty("capture");
   });
 });
+
+// PRP-E Task 6 — 5-job integration. Cross-PRP drift detector: a clean run
+// from enqueue → ack against the real `InMemoryProfileQueue` proves
+// contracts A/B/C/D/E still mesh. Failure here red-lights BEFORE the smoke
+// touches sponsor APIs.
+describe("runProfiler — PRP-E Task 6: 5-job integration", () => {
+  it("processes 5 distinct jobs end-to-end + LRU dedupe on re-enqueue + empty DLQ", async () => {
+    // Per-job contentHash so ProfileStore writes 5 distinct rows (the store
+    // is keyed on (advertiserId, contentHash)).
+    const rig = buildRig({
+      harness: async (url: string) => {
+        const hex = url.replace(/\W/g, "").slice(0, 64).padStart(64, "0");
+        return buildCapture({ url, contentHash: hex });
+      },
+    });
+    const abort = new AbortController();
+    const handle = createProfiler({ ...rig.deps, signal: abort.signal });
+    const start = Date.now();
+    const run = handle.start();
+    try {
+      for (let i = 0; i < 5; i++) {
+        await rig.queue.enqueue(
+          buildJob({ id: `job-${i}`, pageUrl: `https://example.test/p${i}` }),
+        );
+      }
+      await waitFor(() => rig.profileStore.put.mock.calls.length === 5, 5_000);
+      expect(Date.now() - start).toBeLessThan(5_000);
+      expect(rig.auditStore.rows().length).toBe(5);
+
+      // LRU dedupe: re-enqueue same ids → harness must NOT be called again.
+      const captureCallsBefore = rig.harness.capturePage.mock.calls.length;
+      expect(captureCallsBefore).toBe(5);
+      for (let i = 0; i < 5; i++) {
+        await rig.queue.enqueue(
+          buildJob({ id: `job-${i}`, pageUrl: `https://example.test/p${i}` }),
+        );
+      }
+      // Let the loop drain the re-deliveries — they short-circuit on LRU.
+      await new Promise((r) => setTimeout(r, 100));
+      expect(rig.harness.capturePage.mock.calls.length).toBe(captureCallsBefore);
+      // Re-deliveries are acked (LRU short-circuit), so DLQ stays empty.
+      expect(rig.queue.getDLQ()).toHaveLength(0);
+    } finally {
+      abort.abort();
+      await run;
+    }
+  });
+});

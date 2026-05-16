@@ -45,7 +45,7 @@ file × ~6.5× expansion). Each PRP capped at 400 lines.
       *Validation gate:* `pnpm --filter @scout/profiler test` green, full
       hot-path / warm-path ESLint boundary still passes.
 
-- [ ] **PRP-D — `profiler-cost-ttl-retry.md`** (380 lines, confidence 8/10)
+- [x] **PRP-D — `profiler-cost-ttl-retry.md`** (380 lines, confidence 8/10)
       → `PRPs/clusterB/profiler-real-loop/profiler-cost-ttl-retry.md`
       Lands `costTripwire.ts` (rolling-window degradation) + `ttlPolicy.ts`
       (host + og-type TTL heuristic) + `retry.ts` (`classifyError` +
@@ -56,7 +56,7 @@ file × ~6.5× expansion). Each PRP capped at 400 lines.
       *Validation gate:* `pnpm --filter @scout/profiler test` green
       including the fake-timer cost-window + TTL `test.each` matrices.
 
-- [ ] **PRP-E — `profiler-tenant-shutdown-smoke.md`** (382 lines,
+- [x] **PRP-E — `profiler-tenant-shutdown-smoke.md`** (382 lines,
       confidence 8/10)
       → `PRPs/clusterB/profiler-real-loop/profiler-tenant-shutdown-smoke.md`
       Lands `rewriteEvidenceUri()` (tenant scoping at commit time),
