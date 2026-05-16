@@ -1,0 +1,138 @@
+import { randomUUID } from "node:crypto";
+import type { FastifyRequest, FastifyReply } from "fastify";
+import type { ProfileStore, PolicyStore, AuditStore, ProfileQueue } from "@scout/store";
+import type { LlmClient } from "@scout/llm-client";
+import type { PolicyMatcher } from "@scout/policy";
+import type { PageProfile, BidVerificationRequest, VerificationVerdict } from "@scout/shared";
+import { BidVerificationRequestSchema } from "@scout/shared";
+import { escalateToFlash } from "./escalate.js";
+import { assembleVerdict, buildReasonsFromMatch, failClosedVerdict } from "./verdict.js";
+
+export interface GateDeps {
+  profileStore: ProfileStore;
+  policyStore: PolicyStore;
+  auditStore: AuditStore;
+  profileQueue: ProfileQueue;
+  llmClient: LlmClient;
+  policyMatcher: PolicyMatcher;
+}
+
+function isTtlExpired(profile: PageProfile): boolean {
+  // profile.ttl is SECONDS — multiply by 1000 for ms comparison
+  return Date.now() > new Date(profile.capturedAt).getTime() + profile.ttl * 1000;
+}
+
+export function createHandler(deps: GateDeps) {
+  return async function handler(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const start = Date.now();
+    let verdict: VerificationVerdict | undefined;
+    try {
+      const parsed = BidVerificationRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        await reply.code(400).send({ error: parsed.error.flatten() });
+        return;
+      }
+      const body: BidVerificationRequest = parsed.data;
+      const profile = await deps.profileStore.get(body.pageUrl);
+
+      if (profile === null || isTtlExpired(profile)) {
+        setImmediate(() => {
+          void deps.profileQueue
+            .enqueue({
+              url: body.pageUrl,
+              advertiserId: body.advertiserId,
+              policyId: body.policyId,
+              requestedAt: new Date().toISOString(),
+            })
+            .catch((e: unknown) => {
+              console.error("[gate] profile_queue_enqueue_failed", e);
+            });
+        });
+        verdict = failClosedVerdict("cache_miss", Date.now() - start);
+        await reply.send(verdict);
+        return;
+      }
+
+      // MUST be tenant-scoped — never PolicyStore.get(policyId) without advertiserId
+      const policy = await deps.policyStore.get(body.policyId, body.advertiserId);
+      if (policy === null) {
+        // DENY (not 404) to prevent policy-ID enumeration by adversaries
+        verdict = failClosedVerdict("tenant_mismatch", Date.now() - start, profile.id, "");
+        await reply.send(verdict);
+        return;
+      }
+
+      const matchResult = deps.policyMatcher.match(profile, policy);
+      const isAmbiguous = matchResult.confidence < policy.escalation.humanReviewThreshold;
+
+      if (!isAmbiguous && matchResult.decision !== "HUMAN_REVIEW") {
+        verdict = assembleVerdict({
+          decision: matchResult.decision,
+          reasons: buildReasonsFromMatch(matchResult),
+          profileId: profile.id,
+          policyVersion: policy.version,
+          latencyMs: Date.now() - start,
+          lobstertrapTraceId: null,
+        });
+        await reply.send(verdict);
+        return;
+      }
+
+      if (
+        policy.escalation.ambiguousAction === "HUMAN_REVIEW" ||
+        matchResult.decision === "HUMAN_REVIEW"
+      ) {
+        verdict = assembleVerdict({
+          decision: "HUMAN_REVIEW",
+          reasons: [
+            ...buildReasonsFromMatch(matchResult),
+            {
+              kind: "arbiter_disagreement",
+              ref: "policy_escalation",
+              detail: "Escalation policy set to HUMAN_REVIEW for ambiguous matches",
+            },
+          ],
+          profileId: profile.id,
+          policyVersion: policy.version,
+          latencyMs: Date.now() - start,
+          lobstertrapTraceId: null,
+        });
+        await reply.send(verdict);
+        return;
+      }
+
+      const escalation = await escalateToFlash(deps.llmClient, profile, policy);
+      // Escalation reasons first so fail_closed/lobstertrap surfaces at index 0
+      verdict = assembleVerdict({
+        decision: escalation.decision,
+        reasons: [...escalation.reasons, ...buildReasonsFromMatch(matchResult)],
+        profileId: profile.id,
+        policyVersion: policy.version,
+        latencyMs: Date.now() - start,
+        lobstertrapTraceId: escalation.lobstertrapTraceId,
+      });
+      await reply.send(verdict);
+    } catch (err: unknown) {
+      verdict = failClosedVerdict("handler_exception", Date.now() - start);
+      console.error("[gate] handler_exception", err);
+      await reply.code(500).send(verdict);
+    } finally {
+      if (verdict !== undefined) {
+        const v = verdict;
+        setImmediate(() => {
+          void deps.auditStore
+            .put({
+              id: randomUUID(),
+              requestId: String(Date.now()),
+              verdict: v,
+              request: req.body as BidVerificationRequest,
+              createdAt: new Date().toISOString(),
+            })
+            .catch((e: unknown) => {
+              console.error("[gate] gate_audit_dropped", e);
+            });
+        });
+      }
+    }
+  };
+}
