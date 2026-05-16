@@ -4,6 +4,10 @@ You are a senior Node/TypeScript backend engineer fluent in headless-browser aut
 
 **P1 — warm-path-blocking, demo-load-bearing.** Corresponds to the `harness-capture-page.md` row in `FEATURE-TODO.md` under *Cluster B — Warm path*. Independent of every verifier prompt (`FEATURE-TODO.md:50-52`) — output is a typed `PageCapture`, so the four agents can be built against a fixture in parallel. Until this lands, `profiler-real-loop.md` has nothing to feed verifiers (foundation only stubs `harness.capturePage` returning a fixed shape — see `packages/harness/src/index.ts:1`), so every demo `PageProfile` is synthetic, the *declared-vs-detected intent diff* moment in `dashboard-verdict-views.md` shows hand-crafted data, and the cache the gate reads (`features/architecture.md:32-37`) only contains hand-seeded entries. **Latency stakes — explicitly NOT hot path.** This is warm path: seconds-to-minutes per page is acceptable (`features/architecture.md:55`); the capture call **must not** be invoked from `packages/gate/**`, and the foundation ESLint boundary at `PRPs/foundation-ad-verification.md:157-159` already blocks that import — preserve it.
 
+The browswer-use github README.md recommends this agent skill: https://docs.browser-use.com/llms-full.txt 
+
+i also installed the browser-use skill in /home/hustlxai-1/.claude/skills/browser-use.
+
 ## FEATURE:
 
 Replace the foundation stub at `packages/harness/src/index.ts:1` (currently `export {};`) with the real `capturePage(url, opts) → PageCapture` body described in `features/architecture.md:113-115` and `features/architecture.md:47`, **plus** lock the cross-package contracts foundation hand-waved (per `PRPs/foundation-ad-verification.md:136`) but never landed in `@scout/shared`. Same pattern as `features/clusterA/policy-match-evaluation.md` locking `PolicyMatchResult`: the consumer-side type goes in `@scout/shared`; the provider package implements against it.

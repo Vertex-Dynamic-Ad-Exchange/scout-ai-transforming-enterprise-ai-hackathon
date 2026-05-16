@@ -40,3 +40,4 @@ Thumbs.db
 
 # misc
 ui/.vite/
+.claude/settings.local.json
