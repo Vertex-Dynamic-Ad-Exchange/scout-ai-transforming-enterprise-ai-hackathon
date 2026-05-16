@@ -13,6 +13,7 @@ import {
 } from "@scout/shared";
 import type { HarnessConfig } from "./config.js";
 import { classifySdkError } from "./errors.js";
+import { detectConsentWall } from "./consentWall.js";
 import { canonicalDomText, MAX_DOM_TEXT_BYTES, truncateToBytes } from "./extract.js";
 import { computeContentHash } from "./hash.js";
 import { extractFromPage } from "./domExtract.js";
@@ -42,11 +43,11 @@ export async function capturePage(
   //    every capture through the US proxy.
   const opts = CaptureOptionsSchema.parse(optsIn ?? {});
 
-  // 2. PRP-B2 D5: forceAgentMode is a PRP-C surface. Refuse it here loudly
-  //    so a forced-agent caller never silently degrades to browser mode.
-  if (opts.forceAgentMode) {
-    throw new HarnessException(HarnessError.NAVIGATION_FAILED, "forceAgentMode requires PRP-C");
-  }
+  // PRP-C1 lifts the D5 throw — factory.ts now routes forceAgentMode:true
+  // to captureViaAgent BEFORE this function runs. If the flag still arrives
+  // here it's a routing regression in factory.ts; let the option through as
+  // metadata only and let downstream tests catch it. The two-pass orchestrator
+  // in PRP-C2 will centralize this.
 
   // 3. URL scheme guard. file://, data:, chrome-extension://, javascript:
   //    must never reach the cloud session.
@@ -130,8 +131,7 @@ export async function capturePage(
     // harmless in production builds where __name was never injected.
     await page.addInitScript(() => {
       (globalThis as unknown as { __name?: <T>(fn: T) => T }).__name =
-        (globalThis as unknown as { __name?: <T>(fn: T) => T }).__name ??
-        ((fn) => fn);
+        (globalThis as unknown as { __name?: <T>(fn: T) => T }).__name ?? ((fn) => fn);
     });
 
     // 7. Navigate. `load` over `networkidle` — ad-supported pages never
@@ -150,8 +150,13 @@ export async function capturePage(
       throw new HarnessException(HarnessError.NAVIGATION_FAILED, "unsupported content-type");
     }
 
-    // 9. PRP-B2 D4: consent-wall stub. PRP-C wires real detection + the
-    //    Agent-mode two-pass fallback together.
+    // 9. PRP-C1 D4: consent-wall heuristic. False positives cost an extra
+    //    Agent round-trip (PRP-C2); false negatives surface as low-quality
+    //    Browser captures. Exit BEFORE paying for extract + screenshots so
+    //    the two-pass orchestrator can decide quickly.
+    if (await detectConsentWall(page)) {
+      throw new HarnessException(HarnessError.CONSENT_WALL_UNRESOLVED, "consent wall present");
+    }
 
     // 10–11. DOM extraction (text + metadata + headline) in one round-trip.
     const extracted = await extractFromPage(page);

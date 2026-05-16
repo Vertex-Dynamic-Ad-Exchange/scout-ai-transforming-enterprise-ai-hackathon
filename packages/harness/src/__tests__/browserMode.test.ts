@@ -26,6 +26,7 @@ interface FakePage {
   goto: ReturnType<typeof vi.fn>;
   url: ReturnType<typeof vi.fn>;
   evaluate: ReturnType<typeof vi.fn>;
+  $$: ReturnType<typeof vi.fn>;
   $$eval: ReturnType<typeof vi.fn>;
   screenshot: ReturnType<typeof vi.fn>;
   waitForTimeout: ReturnType<typeof vi.fn>;
@@ -51,7 +52,15 @@ function buildPage(opts: { url?: string; bytes?: Buffer } = {}): FakePage {
       headers: () => ({ "content-type": "text/html" }),
     }),
     url: vi.fn().mockReturnValue(opts.url ?? "https://example.test/article"),
-    evaluate: vi.fn().mockResolvedValue(undefined),
+    // PRP-C1: detectConsentWall calls page.evaluate(() => body.innerText.length)
+    // BEFORE the DOM extract. Queue a safe length (>200) first so existing tests
+    // that .mockResolvedValueOnce(defaultExtract()) still pin the extract on the
+    // SECOND call.
+    evaluate: vi.fn().mockResolvedValueOnce(5000).mockResolvedValue(undefined),
+    // detectConsentWall iterates BANNER_SELECTORS with page.$$ — default to
+    // "no banner present" so the happy paths stay green; the consent-wall test
+    // overrides this per-call.
+    $$: vi.fn().mockResolvedValue([]),
     $$eval: vi.fn().mockResolvedValue([]),
     screenshot: vi.fn().mockResolvedValue(opts.bytes ?? Buffer.from("png-bytes")),
     waitForTimeout: vi.fn().mockResolvedValue(undefined),
@@ -130,18 +139,6 @@ describe("capturePage — happy path (no video)", () => {
     });
   });
 
-  it("rejects forceAgentMode with NAVIGATION_FAILED (PRP-C still owns Agent mode)", async () => {
-    let thrown: unknown;
-    try {
-      await createHarness().capturePage("https://example.test/", { forceAgentMode: true });
-    } catch (e) {
-      thrown = e;
-    }
-    expect(thrown).toBeInstanceOf(HarnessException);
-    expect((thrown as HarnessException).code).toBe(HarnessError.NAVIGATION_FAILED);
-    expect(mocks.create).not.toHaveBeenCalled();
-  });
-
   it("rejects non-http(s) URLs with NAVIGATION_FAILED before any cloud call", async () => {
     let thrown: unknown;
     try {
@@ -152,6 +149,31 @@ describe("capturePage — happy path (no video)", () => {
     expect(thrown).toBeInstanceOf(HarnessException);
     expect((thrown as HarnessException).code).toBe(HarnessError.NAVIGATION_FAILED);
     expect(mocks.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("capturePage — consent wall", () => {
+  it("throws CONSENT_WALL_UNRESOLVED when detectConsentWall fires, cleans up the session", async () => {
+    // PRP-C1 Task 2: replaces the D4 stub. Consent-wall pages exit Browser
+    // mode loudly so the two-pass orchestrator in PRP-C2 can retry under Agent.
+    mocks.create.mockResolvedValue(defaultSession());
+    const page = buildPage();
+    // First $$ call (BANNER_SELECTORS[0] = "#onetrust-banner-sdk") hits.
+    page.$$.mockResolvedValueOnce([{}] as unknown[]);
+    mocks.connectOverCDP.mockResolvedValue(buildBrowser(page));
+
+    let thrown: unknown;
+    try {
+      await createHarness().capturePage("https://example.test/article");
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(HarnessException);
+    expect((thrown as HarnessException).code).toBe(HarnessError.CONSENT_WALL_UNRESOLVED);
+    expect((thrown as HarnessException).message).toMatch(/consent wall/);
+    // Cloud session cleanup must still run on the consent-wall path —
+    // an unsto­pped session is a money leak.
+    expect(mocks.stop).toHaveBeenCalledWith("sess-1");
   });
 });
 

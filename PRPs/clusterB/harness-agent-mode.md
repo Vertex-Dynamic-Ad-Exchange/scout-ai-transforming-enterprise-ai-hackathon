@@ -40,29 +40,38 @@ description: |
 
   | # | Question | Locked answer |
   |---|---|---|
-  | D1 | Agent entrypoint | `sessions.create({ startUrl, persistMemory: false, keepAlive: false, ... })` → `tasks.create({ sessionId, task, schema })`. Two calls = clean tear-down handle. |
+  | D1 | Agent entrypoint | `sessions.create({ startUrl, persistMemory: false, keepAlive: false, ... })` → `tasks.create({ sessionId, task, structuredOutput })` → `tasks.wait(taskId)`. **R1 resolution (verified on impl, 2026-05-15): `sdk.tasks.create()` returns a bare `TaskCreatedResponse` — there is no `.complete()`.** The only `TaskRun<T>` path is `sdk.run(prompt, { sessionId, schema })`, which internally calls `z.toJSONSchema(schema)` from zod 4 (`browser-use-sdk@3.6.0` bundles zod 4). `@scout/shared` pins zod 3, so passing our `AgentOutputSchema` to `sdk.run({ schema })` silently breaks at runtime. We instead send a hand-authored `AGENT_OUTPUT_JSON_SCHEMA` literal via `structuredOutput` (the literal SDK contract) and parse the result ourselves with the zod 3 schema. |
   | D2 | Agent prompt | Fixed string; only `url` interpolated. T3c asserts no other template variables. |
-  | D3 | Structured output | zod `AgentOutputSchema` passed to `tasks.create({ schema })`. Output normalized to `PageCapture` via `assembleAgentCapture`. |
+  | D3 | Structured output | Stringified JSON Schema (`AGENT_OUTPUT_JSON_SCHEMA`) passed via `tasks.create({ structuredOutput })`. Output is a string on `TaskView.output`; we `JSON.parse` then `AgentOutputSchema.safeParse` (zod 3) for defense-in-depth. `assembleAgentCapture` normalizes to `PageCapture`. |
   | D4 | Consent-wall heuristic | Static selector list + content-starvation floor (`innerText.length < 200`). False positives = extra Agent round-trip; false negatives = low-quality Browser capture. v1 trade. |
-  | D5 | Agent hard cap | `opts.timeoutMs ?? 60_000`. `Promise.race` against `setTimeout` mirroring PRP-B2 Task 12 path B. |
+  | D5 | Agent hard cap | `opts.timeoutMs ?? 60_000`. `Promise.race` against `setTimeout` mirroring PRP-B2 Task 12 path B. The race wraps `sdk.tasks.wait(taskId, { timeout, interval: 2000 })`. |
   | D6 | `forceAgentMode: true` | Wired interim in `factory.ts` (one-line conditional). PRP-C2 centralizes in `capture.ts`. |
+  | D7 | New runtime dep | `zod@^3.23.8` added to `@scout/harness/package.json` (matches `@scout/shared`'s pin). Used internally to define `AgentOutputSchema`; not exposed across the package seam. PRP-B1 Task 1's dep approval was Cloud SDK + Playwright; surface this in the PR description so the consent gate is visible. |
 
-  ## SDK shape (Agent mode, verified upstream 2026-05-15)
+  ## SDK shape (Agent mode, verified upstream 2026-05-15 AND on impl)
 
   ```ts
   const session = await client.sessions.create({
     proxyCountryCode: "us",        // alpha-2 LOWERCASE; SDK auto-lowercases
     startUrl: url,
     browserScreenWidth: 1280, browserScreenHeight: 800,
-    persistMemory: false,          // tenancy pin
-    keepAlive: false,              // tenancy + cost pin
+    persistMemory: false,          // tenancy pin (server defaults TRUE)
+    keepAlive: false,              // tenancy + cost pin (server defaults TRUE)
+    enableRecording: false,
   });
-  const taskRun = await client.tasks.create({
-    sessionId: session.id, task: AGENT_TASK_PROMPT(url), schema: AgentOutputSchema,
+  const taskCreated = await client.tasks.create({
+    task: AGENT_TASK_PROMPT(url),
+    sessionId: session.id,
+    structuredOutput: JSON.stringify(AGENT_OUTPUT_JSON_SCHEMA),  // hand-authored, mirrors AgentOutputSchema
   });
-  const output = await taskRun.complete();   // verify exact method in src/v2/helpers.ts on impl
+  const taskView = await client.tasks.wait(taskCreated.id, { timeout: timeoutMs, interval: 2000 });
+  // taskView.output is string | null; JSON.parse + AgentOutputSchema.safeParse.
   // try { ... } finally { await client.sessions.stop(session.id); }
   ```
+
+  > **R1 resolved on impl**: do NOT use `sdk.run({ schema })` — it pulls in
+  > zod 4 (`z.toJSONSchema`) and silently breaks on zod-3 inputs. Send
+  > `structuredOutput` directly as stringified JSON Schema instead.
 
   ## All Needed Context
 
@@ -162,33 +171,46 @@ description: |
 
   Red. `agentMode.test.ts`:
 
-  - **T3a — happy** — `sessions.create` mock resolves `{ id: "agent-1",
-    ... }`; `tasks.create` mock returns a `TaskRun` whose `.complete()`
-    resolves with valid `AgentOutput`. Drive `captureViaAgent(sdk, cfg,
-    "https://example.test/article", {})`. Assert:
+  Mock surface (R1-adjusted): mocks four entries — `sessions.create`,
+  `sessions.stop`, `tasks.create`, `tasks.wait`. **No `tasks.create({ schema })`
+  / `.complete()` — those don't exist in the SDK.** Mocks set on the structurally-
+  typed `sdk` fake passed directly to `captureViaAgent(sdk, cfg, ...)`.
+
+  - **T3a — happy** — `sessions.create` mock resolves `{ id: "agent-1" }`;
+    `tasks.create` resolves `{ id: "task-1" }`; `tasks.wait` resolves
+    `{ output: JSON.stringify(validAgentOutput) }`. Drive
+    `captureViaAgent(sdk, cfg, "https://example.test/article", {})`. Assert:
     - `result.capturedBy.mode === "agent"`, `.sessionId === "agent-1"`
     - `result.screenshots.length >= 1`
     - `result.url === <finalUrl from mock>`
     - `sessions.create` spy: **both** `persistMemory: false` AND
       `keepAlive: false` (tenancy pins).
-    - `tasks.create` spy: `task === AGENT_TASK_PROMPT(url)` (exact match).
+    - `tasks.create` spy: `task === AGENT_TASK_PROMPT(url)` (exact match)
+      AND `structuredOutput === JSON.stringify(AGENT_OUTPUT_JSON_SCHEMA)`
+      (defends against silent schema drift between zod and JSON).
     - `sessions.stop("agent-1")` called exactly once.
-  - **T3b — failure mapping** — `tasks.create` mock rejects with
+  - **T3b — failure mapping** — `tasks.wait` mock rejects with
     422-shaped error → throws `HarnessException` with `code ===
-    UPSTREAM_DOWN`.
+    UPSTREAM_DOWN`. Use `mockImplementation(() => Promise.reject(...))`
+    (not `mockReturnValue`) to defer the rejection to call-time and
+    avoid an unhandled-rejection flag during mock setup.
   - **T3c — prompt-injection mitigation** — module-level (no SDK call):
     - `AGENT_TASK_PROMPT("https://x.test/").match(/\{[a-zA-Z_]+\}/)`
       is `null` (no template variables).
     - 10 random URL substitutions; prompt differs only at the URL
-      position.
-  - **T3d — timeout cap** — `opts.timeoutMs: 100` + `tasks.create`
+      position (`template.replace("<URL>", url)` exactly matches).
+  - **T3d — timeout cap** — `opts.timeoutMs: 100` + `tasks.wait`
     mock that never resolves → throws `HarnessError.TIMEOUT` within
-    ~150ms slack. Use `vi.useFakeTimers` + `advanceTimersByTime`.
+    ~200ms slack. **Use real timers** (mirror
+    `browserMode.abort.test.ts`); `vi.useFakeTimers` is brittle here
+    because `mkdtemp` runs before the setTimeout is set and the fake
+    timer clock doesn't fake `fs.*`.
   - **T3e — `geo` passthrough** — `opts.geo: "DE"` → `sessions.create`
     spy receives `proxyCountryCode: "de"`; output `geo === "DE"`.
-  - **T3f — schema-conformance regression** — `tasks.create` mock
-    resolves with object missing `finalUrl` → throws `UPSTREAM_DOWN`;
-    message regex `/^agent output invalid at path: [\w.]+$/`.
+  - **T3f — schema-conformance regression** — `tasks.wait` mock
+    resolves with `{ output: JSON.stringify({...missing finalUrl}) }` →
+    throws `UPSTREAM_DOWN`; message regex
+    `/^agent output invalid at path: [\w.]+$/`.
 
   Green. `agentMode.ts` outline (≤ 200 lines; extract
   `agentAssemble.ts` if it grows):
@@ -327,11 +349,19 @@ description: |
   Strengths: SDK source read-verified; agent prompt bounded and
   testable; tenancy pins spy-asserted.
 
-  Risks:
-  - **R1 — `TaskRun.complete()` exact method name.** Read
-    `src/v2/helpers.ts` during impl; adjust both `agentMode.ts` AND
-    T3a mock surface if it differs.
+  Risks (impl-time status):
+  - **R1 — `TaskRun.complete()` exact method name.** **RESOLVED on
+    impl, 2026-05-15**: `sdk.tasks.create()` returns a bare
+    `TaskCreatedResponse` (no `.complete()`). `TaskRun` exists only on
+    `sdk.run(...)`, which pulls in zod 4's `z.toJSONSchema` and silently
+    fails on our zod 3 schema. Adopted `tasks.create({ structuredOutput })`
+    + `tasks.wait(taskId)` with a hand-authored JSON Schema literal
+    (`AGENT_OUTPUT_JSON_SCHEMA`). D1, D3, and the SDK shape block all
+    updated. T3 mock surface changed: `tasks.wait` instead of a
+    `TaskRun`-shaped mock.
   - **R2 — Vendor LLM schema-violating output.** Occasional; `safeParse`
-    re-wraps as `UPSTREAM_DOWN`. Smoke surfaces it.
+    re-wraps as `UPSTREAM_DOWN`. Smoke surfaces it. Two layers now: the
+    server's structuredOutput constraint (best-effort by the vendor LLM)
+    + our zod safeParse on return.
   - **R3 — Consent-wall heuristic false positives.** Acceptable cost
     is latency; expand selector list if smoke surfaces missed banners.
