@@ -1,4 +1,13 @@
-import type { AuditRow, PageProfile, Policy } from "@scout/shared";
+import type { AuditRow, Decision, PageProfile, Policy } from "@scout/shared";
+
+// Reverse-chronological by (ts, id). ISO-8601 string compare is
+// lexicographic-correct; id tiebreak guarantees a deterministic total
+// order, required so cursor pagination never skips or duplicates.
+function auditRowDesc(a: AuditRow, b: AuditRow): number {
+  if (a.ts !== b.ts) return a.ts < b.ts ? 1 : -1;
+  if (a.id !== b.id) return a.id < b.id ? 1 : -1;
+  return 0;
+}
 
 export interface ProfileStore {
   get(url: string, contentHash?: string): Promise<PageProfile | null>;
@@ -10,8 +19,26 @@ export interface PolicyStore {
   get(policyId: string, advertiserId: string): Promise<Policy | null>;
 }
 
+export interface AuditQueryFilter {
+  advertiserId: string; // REQUIRED — tenant scope. No overload without it.
+  since?: string; // ISO-8601 datetime
+  until?: string;
+  decision?: Decision;
+  pageUrl?: string; // exact match; v1 not substring
+  kind?: "verdict" | "profile_job_dlq";
+  limit?: number; // ≤ 200, default 50
+  cursor?: string; // opaque pagination token
+}
+
+export interface AuditQueryResult {
+  rows: AuditRow[];
+  nextCursor: string | null;
+}
+
 export interface AuditStore {
   put(row: AuditRow): Promise<void>;
+  query(filter: AuditQueryFilter): Promise<AuditQueryResult>;
+  get(advertiserId: string, id: string): Promise<AuditRow | null>;
 }
 
 export interface ProfileJob {
@@ -57,10 +84,23 @@ export function createStores(_config?: StoreConfig): {
     },
   };
 
+  const auditRows: AuditRow[] = [];
+
   const auditStore: AuditStore = {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async put(_row: AuditRow): Promise<void> {
-      // In-memory: no persistence; production impl uses ioredis/sqlite
+    async put(row: AuditRow): Promise<void> {
+      auditRows.push(row);
+    },
+    async query(filter: AuditQueryFilter): Promise<AuditQueryResult> {
+      const rows = auditRows
+        .filter((r) => r.advertiserId === filter.advertiserId)
+        .slice()
+        .sort(auditRowDesc);
+      return { rows, nextCursor: null };
+    },
+    async get(advertiserId: string, id: string): Promise<AuditRow | null> {
+      return (
+        auditRows.find((r) => r.advertiserId === advertiserId && r.id === id) ?? null
+      );
     },
   };
 
