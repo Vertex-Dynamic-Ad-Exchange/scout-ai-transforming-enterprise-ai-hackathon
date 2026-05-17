@@ -20,7 +20,14 @@ import { describe, expect, it } from "vitest";
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = resolve(here, "../../dist");
 
-const FORBIDDEN = ["GEMINI_API_KEY", "OPENAI_API_KEY", "LOBSTERTRAP_BEARER"];
+// `MockAuditClient` is the PRP 07 test-only seam (D10). It is NOT a
+// secret, but it MUST NOT reach production bundles — the production
+// dashboard reads through `api/client.ts` against the
+// `@scout/dashboard-backend` HTTP routes (the live tenant-scoped path);
+// if `MockAuditClient` slipped into `dist/` it would mean a tree-shake
+// regression or an accidental runtime barrel re-export, both of which
+// would mask the boundary tested in `__boundary__/no-store-import.test.ts`.
+const FORBIDDEN = ["GEMINI_API_KEY", "OPENAI_API_KEY", "LOBSTERTRAP_BEARER", "MockAuditClient"];
 const EXT = /\.(js|mjs|html|css)$/;
 
 function* walk(dir: string): Iterable<string> {

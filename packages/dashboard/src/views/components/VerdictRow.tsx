@@ -41,12 +41,7 @@ function onKeyDown(
   }
 }
 
-export function VerdictRow({
-  row,
-  top,
-  onSelect,
-  onEscape,
-}: VerdictRowProps): JSX.Element {
+export function VerdictRow({ row, top, onSelect, onEscape }: VerdictRowProps): JSX.Element {
   if (row.kind === "profile_job_dlq") {
     return (
       <div
@@ -78,7 +73,8 @@ export function VerdictRow({
   const { verdict, request } = row;
   return (
     <div
-      role="row"
+      role="button"
+      aria-pressed={false}
       tabIndex={0}
       data-testid={`verdict-row-${row.id}`}
       data-row-kind="verdict"

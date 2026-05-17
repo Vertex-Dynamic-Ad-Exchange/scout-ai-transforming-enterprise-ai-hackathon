@@ -12,6 +12,7 @@ vi.mock("./api/client.js", () => ({
 import { fetchVerdicts, getVerdict } from "./api/client.js";
 import { App } from "./App.js";
 import {
+  __resetSelectedTab,
   __resetSelectedVerdictId,
   setSelectedVerdictId,
 } from "./views/state/selectedVerdict.js";
@@ -43,6 +44,7 @@ describe("<App />", () => {
     // it here so the test is independent of the developer's .env file.
     vi.stubEnv("VITE_LOBSTERTRAP_URL", LT_URL);
     __resetSelectedVerdictId();
+    __resetSelectedTab();
     fetchVerdictsMock.mockReset();
     fetchVerdictsMock.mockResolvedValue({
       status: 200,
