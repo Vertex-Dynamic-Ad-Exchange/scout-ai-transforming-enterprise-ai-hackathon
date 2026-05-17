@@ -11,7 +11,7 @@ Source feature × ~8× expansion projected. Each PRP capped at 400 lines.
 
 ## Order (each PRP blocks the next unless noted)
 
-- [ ] **PRP-A — `demo-package-foundation.md`** (target 300–350 lines)
+- [x] **PRP-A — `demo-package-foundation.md`** (target 300–350 lines)
       → `PRPs/clusterD/demo-bidstream-seeding/demo-package-foundation.md`
       Lands the `@scout/demo` package skeleton, the recording-format
       zod schemas (`ScenarioSchema`, `RecordedBidSchema`,
@@ -24,7 +24,7 @@ Source feature × ~8× expansion projected. Each PRP capped at 400 lines.
       *Validation gate:* `pnpm --filter @scout/demo test` +
       `pnpm -r exec tsc --noEmit` green.
 
-- [ ] **PRP-B — `demo-replayer-seeder-asserts.md`** (target 400 lines)
+- [x] **PRP-B — `demo-replayer-seeder-asserts.md`** (target 400 lines)
       → `PRPs/clusterD/demo-bidstream-seeding/demo-replayer-seeder-asserts.md`
       Lands the core engine: `replayer.ts` (HTTP body, undici keep-alive
       Agent, per-bid latency capture), `seeder.ts` (wraps

@@ -82,10 +82,28 @@ importers:
       '@scout/shared':
         specifier: workspace:*
         version: link:../shared
+      '@scout/store':
+        specifier: workspace:*
+        version: link:../store
+      undici:
+        specifier: ^7.0.0
+        version: 7.25.0
       zod:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
+      '@scout/gate':
+        specifier: workspace:*
+        version: link:../gate
+      '@scout/llm-client':
+        specifier: workspace:*
+        version: link:../llm-client
+      '@scout/policy':
+        specifier: workspace:*
+        version: link:../policy
+      fastify:
+        specifier: ^5.0.0
+        version: 5.8.5
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
@@ -1416,6 +1434,10 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
+  undici@7.25.0:
+    resolution: {integrity: sha512-xXnp4kTyor2Zq+J1FfPI6Eq3ew5h6Vl0F/8d9XU5zZQf1tX9s2Su1/3PiMmUANFULpmksxkClamIZcaUqryHsQ==}
+    engines: {node: '>=20.18.1'}
+
   vite-node@2.1.9:
     resolution: {integrity: sha512-AM9aQ/IPrW/6ENLQg3AGY4K1N2TGZdR5e4gu/MmmR2xR3Ll1+dib+nook92g4TV3PXVyeyxdWwtaCAiUL0hMxA==}
     engines: {node: ^18.0.0 || >=20.0.0}
@@ -2513,6 +2535,8 @@ snapshots:
   undici-types@5.26.5: {}
 
   undici-types@6.21.0: {}
+
+  undici@7.25.0: {}
 
   vite-node@2.1.9(@types/node@18.19.130):
     dependencies:

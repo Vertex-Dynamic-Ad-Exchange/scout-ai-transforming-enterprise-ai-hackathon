@@ -221,13 +221,28 @@ description: |
 
   ### Task 6 — `replayer.ts` failure: gate 500 → `ReplayerError`
 
-  **Red.** Boot rig with a profile + policy whose `category` rule
-  confidence is below `humanReviewThreshold` → matcher escalates to
-  Flash (`handler.ts:133-138`). Stub `chat()` throws → handler `catch`
-  returns 500 with `failClosedVerdict("handler_exception")`
+  **Red.** Boot rig with a profile + policy + a **throwing
+  `policyMatcher`** so `deps.policyMatcher.match(...)` (`handler.ts:94`)
+  throws synchronously inside the handler's `try`, bubbling to the
+  outer `catch` → 500 with `failClosedVerdict("handler_exception")`
   (`handler.ts:149-152`). Assert `ReplayerError` thrown, `.status ===
   500`, `.detail` parseable as `VerificationVerdict` with
   `reasons[0].ref === "handler_exception"`, `.bidIndex === 0`.
+
+  **PRP-execution correction (2026-05-17):** an earlier draft of this
+  task proposed "stub `chat()` throws → handler catch returns 500".
+  That path does NOT yield 500 in the current code:
+  `packages/gate/src/escalate.ts:61-81` catches every `chat()` throw
+  and returns a `DENY` with `kind:"fail_closed"` / `ref:"flash_timeout"
+  | "lobstertrap_unavailable"`, so the gate replies 200. The throwing
+  `policyMatcher` is a synchronous in-handler exception that DOES
+  bubble to the outer catch — preserving the test's intent (replayer
+  surfaces a real gate 500 as `ReplayerError`) without relying on a
+  path that escalate.ts now suppresses. The test builds the Fastify
+  app inline (not via `startInProcessGate`) so the rig's public
+  `InProcessGateOptions` stays `{ initialPolicies?: Policy[] }` and
+  PRPs C–E inherit a clean rig.
+
   **Green.** `ReplayerError` already thrown in Task 4 impl.
 
   ### Task 7 — `seeder.ts` happy path

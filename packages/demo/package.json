@@ -14,9 +14,15 @@
   },
   "dependencies": {
     "@scout/shared": "workspace:*",
+    "@scout/store": "workspace:*",
+    "undici": "^7.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@scout/gate": "workspace:*",
+    "@scout/llm-client": "workspace:*",
+    "@scout/policy": "workspace:*",
+    "fastify": "^5.0.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"
   }

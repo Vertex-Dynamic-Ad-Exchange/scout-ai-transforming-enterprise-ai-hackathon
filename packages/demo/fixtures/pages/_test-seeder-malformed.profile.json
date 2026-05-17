@@ -1,0 +1,10 @@
+{
+  "id": "profile-test-seeder-malformed",
+  "url": "https://example.com/test-seeder-malformed",
+  "contentHash": "sha256:test-seeder-malformed",
+  "categories": [],
+  "detectedEntities": [],
+  "evidenceRefs": [],
+  "capturedAt": "2026-05-17T00:00:00Z",
+  "ttl": -1
+}

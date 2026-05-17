@@ -1,0 +1,10 @@
+{
+  "id": "profile-test-seeder-happy",
+  "url": "https://example.com/test-seeder-happy",
+  "contentHash": "sha256:test-seeder-happy",
+  "categories": [{ "label": "News", "confidence": 0.94 }],
+  "detectedEntities": [],
+  "evidenceRefs": [],
+  "capturedAt": "2026-05-17T00:00:00Z",
+  "ttl": 21600
+}

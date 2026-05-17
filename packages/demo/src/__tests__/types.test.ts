@@ -19,9 +19,7 @@ const minimalFixture = () => ({
       },
     },
   ],
-  expectations: [
-    { latencyMsMax: 300, lobstertrapTraceIdNullable: true },
-  ],
+  expectations: [{ latencyMsMax: 300, lobstertrapTraceIdNullable: true }],
 });
 
 describe("ScenarioSchema (happy)", () => {
@@ -112,25 +110,30 @@ describe("ScenarioSchema — edge matrix", () => {
   describe("lobstertrapTraceIdNullable (D8)", () => {
     it("accepts true", () => {
       const f = minimalFixture();
-      (f.expectations[0] as { lobstertrapTraceIdNullable: boolean }).lobstertrapTraceIdNullable = true;
+      (f.expectations[0] as { lobstertrapTraceIdNullable: boolean }).lobstertrapTraceIdNullable =
+        true;
       expect(() => loadScenario(f)).not.toThrow();
     });
 
     it("accepts false", () => {
       const f = minimalFixture();
-      (f.expectations[0] as { lobstertrapTraceIdNullable: boolean }).lobstertrapTraceIdNullable = false;
+      (f.expectations[0] as { lobstertrapTraceIdNullable: boolean }).lobstertrapTraceIdNullable =
+        false;
       expect(() => loadScenario(f)).not.toThrow();
     });
 
     it("rejects absent", () => {
       const f = minimalFixture();
-      delete (f.expectations[0] as { lobstertrapTraceIdNullable?: boolean }).lobstertrapTraceIdNullable;
+      delete (f.expectations[0] as { lobstertrapTraceIdNullable?: boolean })
+        .lobstertrapTraceIdNullable;
       expect(() => loadScenario(f)).toThrow();
     });
 
     it("rejects 'yes' (string)", () => {
       const f = minimalFixture();
-      (f.expectations[0] as unknown as { lobstertrapTraceIdNullable: unknown }).lobstertrapTraceIdNullable = "yes";
+      (
+        f.expectations[0] as unknown as { lobstertrapTraceIdNullable: unknown }
+      ).lobstertrapTraceIdNullable = "yes";
       expect(() => loadScenario(f)).toThrow();
     });
   });
