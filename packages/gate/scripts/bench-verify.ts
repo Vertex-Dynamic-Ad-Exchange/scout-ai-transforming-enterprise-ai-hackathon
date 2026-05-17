@@ -86,6 +86,12 @@ const deps: GateDeps = {
     async put() {
       /* no-op */
     },
+    async query() {
+      return { rows: [], nextCursor: null };
+    },
+    async get() {
+      return null;
+    },
   },
   profileQueue: {
     async enqueue() {

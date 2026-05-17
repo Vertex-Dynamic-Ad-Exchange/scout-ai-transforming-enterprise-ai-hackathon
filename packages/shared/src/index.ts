@@ -5,6 +5,8 @@ export * from "./schemas/policy.js";
 export * from "./schemas/match.js";
 export * from "./schemas/verdict.js";
 export * from "./schemas/capture.js";
+export * from "./schemas/intent.js";
+export * from "./schemas/audit.js";
 export * from "./schemas/job.js";
 export * from "./schemas/agentVerdict.js";
 export * from "./interfaces/harness.js";

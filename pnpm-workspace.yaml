@@ -1,5 +1,7 @@
 packages:
   - "packages/*"
   - "packages/agents/*"
+allowBuilds:
+  esbuild: false
 onlyBuiltDependencies:
   - esbuild
