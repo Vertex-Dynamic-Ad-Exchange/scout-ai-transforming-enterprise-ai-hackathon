@@ -68,7 +68,11 @@ export function buildDeps(overrides: Partial<GateDeps> = {}): GateDeps {
       put: vi.fn().mockResolvedValue(undefined),
     },
     policyStore: { get: vi.fn().mockResolvedValue(validPolicy) },
-    auditStore: { put: vi.fn().mockResolvedValue(undefined) },
+    auditStore: {
+      put: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockResolvedValue({ rows: [], nextCursor: null }),
+      get: vi.fn().mockResolvedValue(null),
+    },
     profileQueue: { enqueue: vi.fn().mockResolvedValue(undefined) },
     llmClient: { chat: vi.fn(), healthcheck: vi.fn() },
     policyMatcher: { match: vi.fn().mockReturnValue(clearAllowResult) },

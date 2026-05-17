@@ -1,81 +1,7 @@
 import { describe, it, expect } from "vitest";
-import type {
-  AuditRow,
-  AuditRowProfileJobDlq,
-  AuditRowVerdict,
-  Decision,
-} from "@scout/shared";
+import type { AuditRow } from "@scout/shared";
 import { createStores } from "./index.js";
-
-function makeVerdictRow(overrides: Partial<AuditRowVerdict> = {}): AuditRowVerdict {
-  const base: AuditRowVerdict = {
-    kind: "verdict",
-    id: "row-A-1",
-    advertiserId: "A",
-    ts: "2026-05-15T12:00:00.000Z",
-    request: {
-      advertiserId: "A",
-      policyId: "pol1",
-      pageUrl: "https://example.com/a",
-      creativeRef: "cr-1",
-      geo: "US",
-      ts: "2026-05-15T12:00:00.000Z",
-    },
-    verdict: {
-      decision: "ALLOW",
-      reasons: [],
-      profileId: null,
-      policyVersion: "v1",
-      latencyMs: 12,
-      lobstertrapTraceId: null,
-    },
-    profile: null,
-    declaredIntent: null,
-    detectedIntent: null,
-  };
-  const merged: AuditRowVerdict = { ...base, ...overrides };
-  if (overrides.verdict !== undefined) {
-    merged.verdict = { ...base.verdict, ...overrides.verdict };
-  }
-  if (overrides.request !== undefined) {
-    merged.request = { ...base.request, ...overrides.request };
-  }
-  return merged;
-}
-
-function verdictRowFor(
-  advertiserId: string,
-  id: string,
-  ts: string,
-  decision: Decision = "ALLOW",
-  pageUrl = "https://example.com/a",
-): AuditRowVerdict {
-  return makeVerdictRow({
-    id,
-    advertiserId,
-    ts,
-    verdict: { decision } as AuditRowVerdict["verdict"],
-    request: { advertiserId, pageUrl } as AuditRowVerdict["request"],
-  });
-}
-
-function dlqRowFor(
-  advertiserId: string,
-  id: string,
-  ts: string,
-  pageUrl = "https://example.com/dlq",
-): AuditRowProfileJobDlq {
-  return {
-    kind: "profile_job_dlq",
-    id,
-    advertiserId,
-    ts,
-    jobId: `${id}-job`,
-    pageUrl,
-    attempts: 3,
-    nackReason: "timeout",
-  };
-}
+import { dlqRowFor, makeVerdictRow, verdictRowFor } from "./audit.test-helpers.js";
 
 describe("AuditStore — happy round-trip", () => {
   it("put → query → get returns the same row", async () => {
@@ -232,5 +158,138 @@ describe("AuditStore — pagination", () => {
     const defaultPage = await auditStore.query({ advertiserId: "A" });
     expect(defaultPage.rows).toHaveLength(50);
     expect(defaultPage.nextCursor).not.toBeNull();
+  });
+});
+
+describe("AuditStore — tenant isolation (LOAD-BEARING)", () => {
+  it("query for A returns only A's rows; query for B returns only B's", async () => {
+    const { auditStore } = createStores();
+    const aRows: AuditRow[] = [
+      verdictRowFor("A", "a-1", "2026-05-15T12:00:00.000Z"),
+      verdictRowFor("A", "a-2", "2026-05-15T12:01:00.000Z"),
+      verdictRowFor("A", "a-3", "2026-05-15T12:02:00.000Z", "DENY"),
+      dlqRowFor("A", "a-4", "2026-05-15T12:03:00.000Z"),
+      verdictRowFor("A", "a-5", "2026-05-15T12:04:00.000Z"),
+    ];
+    const bRows: AuditRow[] = [
+      verdictRowFor("B", "b-1", "2026-05-15T12:00:30.000Z"),
+      verdictRowFor("B", "b-2", "2026-05-15T12:01:30.000Z", "DENY"),
+      dlqRowFor("B", "b-3", "2026-05-15T12:02:30.000Z"),
+      verdictRowFor("B", "b-4", "2026-05-15T12:03:30.000Z"),
+      verdictRowFor("B", "b-5", "2026-05-15T12:04:30.000Z", "HUMAN_REVIEW"),
+    ];
+    for (const r of [...aRows, ...bRows]) await auditStore.put(r);
+
+    const aResult = await auditStore.query({
+      advertiserId: "A",
+      since: "1970-01-01T00:00:00.000Z",
+    });
+    expect(aResult.rows.map((r) => r.id).sort()).toEqual(
+      aRows.map((r) => r.id).sort(),
+    );
+    expect(aResult.rows.every((r) => r.advertiserId === "A")).toBe(true);
+
+    const bResult = await auditStore.query({
+      advertiserId: "B",
+      since: "1970-01-01T00:00:00.000Z",
+    });
+    expect(bResult.rows.map((r) => r.id).sort()).toEqual(
+      bRows.map((r) => r.id).sort(),
+    );
+    expect(bResult.rows.every((r) => r.advertiserId === "B")).toBe(true);
+  });
+
+  it("get('A', <B's id>) returns null (NOT throws) — 404-not-403, symmetric for B", async () => {
+    const { auditStore } = createStores();
+    const aRows = [
+      verdictRowFor("A", "a-1", "2026-05-15T12:00:00.000Z"),
+      verdictRowFor("A", "a-2", "2026-05-15T12:01:00.000Z"),
+    ];
+    const bRows = [
+      verdictRowFor("B", "b-1", "2026-05-15T12:02:00.000Z"),
+      dlqRowFor("B", "b-2", "2026-05-15T12:03:00.000Z"),
+    ];
+    for (const r of [...aRows, ...bRows]) await auditStore.put(r);
+
+    for (const b of bRows) {
+      await expect(auditStore.get("A", b.id)).resolves.toBeNull();
+    }
+    for (const a of aRows) {
+      await expect(auditStore.get("B", a.id)).resolves.toBeNull();
+    }
+
+    // sanity: each tenant CAN see its own rows
+    for (const a of aRows) {
+      const own = await auditStore.get("A", a.id);
+      expect(own?.id).toBe(a.id);
+    }
+    for (const b of bRows) {
+      const own = await auditStore.get("B", b.id);
+      expect(own?.id).toBe(b.id);
+    }
+  });
+
+  it("AuditQueryFilter requires advertiserId at the type level (D5)", () => {
+    const { auditStore } = createStores();
+    // If this line ever stops erroring, the filter type lost its
+    // tenant-scope requirement and pagination could leak across tenants.
+    // @ts-expect-error advertiserId is required by AuditQueryFilter
+    void auditStore.query({ since: "1970-01-01T00:00:00.000Z" });
+  });
+});
+
+describe("AuditStore — cursor opacity (LOAD-BEARING)", () => {
+  async function seed(advertiserId: string, n: number, auditStore: ReturnType<typeof createStores>["auditStore"]): Promise<void> {
+    for (let i = 0; i < n; i++) {
+      const id = `${advertiserId}-${String(i).padStart(3, "0")}`;
+      const ts = `2026-05-15T12:${String(i).padStart(2, "0")}:00.000Z`;
+      await auditStore.put(verdictRowFor(advertiserId, id, ts));
+    }
+  }
+
+  it("nextCursor is a non-empty opaque string (not parseable JSON)", async () => {
+    const { auditStore } = createStores();
+    await seed("A", 60, auditStore);
+    const page1 = await auditStore.query({ advertiserId: "A", limit: 30 });
+    expect(typeof page1.nextCursor).toBe("string");
+    expect(page1.nextCursor!.length).toBeGreaterThan(0);
+    // A JSON.stringify({ts,id}) cursor would let a caller forge a
+    // cross-tenant pivot by re-serializing with a different anchor.
+    // The cursor MUST NOT be parseable JSON.
+    expect(() => JSON.parse(page1.nextCursor!)).toThrow();
+  });
+
+  it("forged cursor resolves to { rows: [], nextCursor: null } (no enumeration)", async () => {
+    const { auditStore } = createStores();
+    await seed("A", 60, auditStore);
+    const forged = Buffer.from("forged-by-attacker").toString("base64url");
+    const result = await auditStore.query({
+      advertiserId: "A",
+      limit: 30,
+      cursor: forged,
+    });
+    expect(result).toEqual({ rows: [], nextCursor: null });
+  });
+
+  it("A's cursor replayed under advertiserId B returns NO rows (forged-pivot defense)", async () => {
+    const { auditStore } = createStores();
+    await seed("A", 60, auditStore);
+    await seed("B", 60, auditStore);
+
+    const aPage1 = await auditStore.query({ advertiserId: "A", limit: 30 });
+    expect(aPage1.nextCursor).not.toBeNull();
+
+    // Caller swaps the advertiserId on the follow-up call. The cursor
+    // anchor was issued for A; the resolver MUST reject A's anchor for
+    // B (D7) — otherwise B sees A's rows.
+    const replayed = await auditStore.query({
+      advertiserId: "B",
+      limit: 30,
+      cursor: aPage1.nextCursor!,
+    });
+    expect(replayed.rows).toEqual([]);
+    expect(replayed.nextCursor).toBeNull();
+    // None of A's ids leaked through.
+    expect(replayed.rows.every((r) => !r.id.startsWith("A-"))).toBe(true);
   });
 });
