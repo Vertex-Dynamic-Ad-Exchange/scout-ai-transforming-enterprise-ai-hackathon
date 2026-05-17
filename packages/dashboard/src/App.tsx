@@ -1,14 +1,15 @@
 import { LobstertrapPane } from "./iframe/LobstertrapPane.js";
+import { VerdictTimeline } from "./views/VerdictTimeline.js";
 
 /**
  * Three-pane dashboard layout (feature spec line 24 + PRP 04 target).
  *
- * Slots render placeholder text the App.test.tsx assertions look up
- * via getByTestId; view bodies land in PRPs 05 (VerdictTimeline), 06
- * (ReasonsDrilldown), and 07 (IntentDiff tab inside the
- * lobstertrap pane). `App.tsx` stays a layout file; new state and
- * fetching go in the per-view components (D12 — extract if this file
- * exceeds 200 lines).
+ * Slots render the verdict views the App.test.tsx assertions look up
+ * via getByTestId; the timeline is wired here (PRP 05). PRP 06
+ * (ReasonsDrilldown) and PRP 07 (IntentDiff tab) replace the
+ * remaining placeholders. `App.tsx` stays a layout file; new state
+ * and fetching live in the per-view components (D12 — extract if
+ * this file exceeds 200 lines).
  */
 export function App(): JSX.Element {
   return (
@@ -28,8 +29,7 @@ export function App(): JSX.Element {
         aria-label="Verdict Timeline"
         style={{ gridArea: "timeline", overflow: "auto" }}
       >
-        {/* PRP 05 mounts <VerdictTimeline /> here. */}
-        <p>Verdict Timeline</p>
+        <VerdictTimeline />
       </section>
       <section
         data-testid="pane-drilldown"

@@ -87,6 +87,44 @@ export async function listVerdicts(
   return ListResponseSchema.parse(body);
 }
 
+/**
+ * 200 + parsed body, OR 304 with `body: null`. The hook in PRP 05
+ * (`useVerdictsQuery`) owns the etag ref — passing it back in via
+ * `ifNoneMatch` is what gets the 304 path to fire on the
+ * `@scout/dashboard-backend` side (PRP 03 routes/verdicts.ts).
+ *
+ * `etag` is the strong validator (RFC 7232 §2.3) the backend writes
+ * with `etagFor`; surface it verbatim so the next call can echo it
+ * unchanged. The 304 response also carries the etag so the hook can
+ * preserve its ref through any transient repeats.
+ */
+export interface FetchVerdictsResult {
+  status: 200 | 304;
+  etag: string | null;
+  body: ListVerdictsResult | null;
+}
+
+export async function fetchVerdicts(
+  params: ListVerdictsParams | undefined,
+  ifNoneMatch: string | null,
+  init?: { signal?: AbortSignal },
+): Promise<FetchVerdictsResult> {
+  const headers: Record<string, string> = { ...(sessionHeader() as Record<string, string>) };
+  if (ifNoneMatch !== null) headers["If-None-Match"] = ifNoneMatch;
+  const requestInit: RequestInit = { headers };
+  if (init?.signal !== undefined) requestInit.signal = init.signal;
+  const res = await fetch(buildListUrl(params), requestInit);
+  const etag = res.headers.get("etag");
+  if (res.status === 304) {
+    return { status: 304, etag, body: null };
+  }
+  if (!res.ok) {
+    throw new Error(`fetchVerdicts failed: HTTP ${res.status}`);
+  }
+  const raw: unknown = await res.json();
+  return { status: 200, etag, body: ListResponseSchema.parse(raw) };
+}
+
 export async function getVerdict(
   id: string,
   init?: { signal?: AbortSignal },
