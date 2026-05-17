@@ -9,9 +9,33 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@scout/shared": "workspace:*"
+    "@scout/shared": "workspace:*",
+    "@tanstack/react-query": "^5.59.0",
+    "@tanstack/react-virtual": "^3.10.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "@testing-library/jest-dom": "^6.5.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "jsdom": "^25.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.0",
+    "vitest-axe": "^0.1.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:bundle": "vitest run --config vitest.bundle.config.ts",
+    "typecheck": "tsc --noEmit"
   }
 }

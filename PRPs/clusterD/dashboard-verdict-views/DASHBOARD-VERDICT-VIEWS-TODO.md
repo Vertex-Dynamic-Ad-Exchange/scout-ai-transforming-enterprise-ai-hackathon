@@ -60,7 +60,7 @@
 
 ### Dashboard skeleton
 
-- [ ] **`04-dashboard-skeleton-and-app.md`** — replace
+- [~] **`04-dashboard-skeleton-and-app.md`** (feature/dashboard-verdict-views) — replace
       `packages/dashboard/src/index.ts` (`export {};`) with a Vite + React
       skeleton: `App.tsx` three-pane layout (40% left, 40%×60% top-right,
       40%×40% bottom-right), Lobster Trap iframe sourced from
