@@ -65,6 +65,31 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/dashboard-backend:
+    dependencies:
+      '@scout/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@scout/store':
+        specifier: workspace:*
+        version: link:../store
+      fastify:
+        specifier: ^5.0.0
+        version: 5.8.5
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^18.0.0
+        version: 18.19.130
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@18.19.130)
+
   packages/gate:
     dependencies:
       '@scout/llm-client':
@@ -1761,7 +1786,7 @@ snapshots:
 
   '@types/node-fetch@2.6.13':
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 20.19.41
       form-data: 4.0.5
 
   '@types/node@18.19.130':
