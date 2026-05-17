@@ -42,6 +42,14 @@ function matchesFilter(row: AuditRow, filter: AuditQueryFilter): boolean {
   return true;
 }
 
+// PRP-B Cluster B queue. NOTE: implements @scout/shared's ProfileQueue, which
+// is DIFFERENT from the local `ProfileQueue` interface in this file (cluster
+// A↔B drift surfaced after main merge 6ed0ebb). Re-exported here so profiler
+// tests + smoke script can resolve through @scout/store's public entry.
+// Follow-up: reconcile the two interfaces in a dedicated PRP.
+export { InMemoryProfileQueue } from "./inMemoryProfileQueue.js";
+export type { InMemoryProfileQueueOptions } from "./inMemoryProfileQueue.js";
+
 export interface ProfileStore {
   get(url: string, contentHash?: string): Promise<PageProfile | null>;
   put(profile: PageProfile): Promise<void>;

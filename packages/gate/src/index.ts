@@ -19,12 +19,17 @@ if (isMain) {
   const { createLlmClient } = await import("@scout/llm-client");
   const { createPolicyMatcher } = await import("@scout/policy");
 
+  const portRaw = process.env["PORT"];
+  const portParsed = portRaw === undefined || portRaw === "" ? NaN : Number.parseInt(portRaw, 10);
+  const port = Number.isInteger(portParsed) && portParsed > 0 && portParsed < 65536 ? portParsed : 3000;
+  const host = process.env["HOST"] ?? "0.0.0.0";
+
   const deps: GateDeps = {
     ...createStores(),
     llmClient: createLlmClient(),
     policyMatcher: createPolicyMatcher(),
   };
   const app = createApp(deps);
-  await app.listen({ port: 3000, host: "0.0.0.0" });
-  console.log("[gate] listening on :3000");
+  await app.listen({ port, host });
+  console.log(`[gate] listening on ${host}:${port}`);
 }

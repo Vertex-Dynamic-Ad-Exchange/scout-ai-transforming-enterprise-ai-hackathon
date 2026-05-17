@@ -24,6 +24,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.41)(jsdom@25.0.1)
 
   packages/agents/image-verifier:
     dependencies:
@@ -34,6 +37,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.41)(jsdom@25.0.1)
 
   packages/agents/text-verifier:
     dependencies:
@@ -44,6 +50,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.41)(jsdom@25.0.1)
 
   packages/agents/video-verifier:
     dependencies:
@@ -54,6 +63,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.41)(jsdom@25.0.1)
 
   packages/dashboard:
     dependencies:
@@ -237,13 +249,34 @@ importers:
 
   packages/profiler:
     dependencies:
+      '@scout/harness':
+        specifier: workspace:*
+        version: link:../harness
+      '@scout/llm-client':
+        specifier: workspace:*
+        version: link:../llm-client
       '@scout/shared':
         specifier: workspace:*
         version: link:../shared
+      '@scout/store':
+        specifier: workspace:*
+        version: link:../store
+      ulid:
+        specifier: ^2.3.0
+        version: 2.4.0
     devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.41
+      tsx:
+        specifier: ^4.19.0
+        version: 4.22.0
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.41)(jsdom@25.0.1)
 
   packages/shared:
     dependencies:
@@ -1837,6 +1870,10 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  ulid@2.4.0:
+    resolution: {integrity: sha512-fIRiVTJNcSRmXKPZtGzFQv9WRrZ3M9eoptl/teFJvjOzmpU+/K/JH6HZ8deBfb5vMEpicJcLn7JmvdknlMq7Zg==}
+    hasBin: true
+
   undici-types@5.26.5:
     resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
 
@@ -3423,6 +3460,8 @@ snapshots:
       fsevents: 2.3.3
 
   typescript@5.9.3: {}
+
+  ulid@2.4.0: {}
 
   undici-types@5.26.5: {}
 
