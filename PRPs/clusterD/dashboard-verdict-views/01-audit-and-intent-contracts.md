@@ -341,10 +341,16 @@ description: |
     `IntentDiff` view (PRP 07) is the layer that MUST escape them
     before rendering. Document in JSDoc on `LobstertrapDetectedIntentSchema`.
   - No `process.env.*` access in this PRP. Schemas have no runtime.
-  - `pageUrl: z.string().url()` on the DLQ variant rejects `javascript:`
-    URIs at the seam (zod's URL parser rejects them) — a defense-in-depth
-    measure given the dashboard renders this field as a link in
-    `VerdictTimeline`.
+  - `pageUrl: z.string().url()` on the DLQ variant guarantees a
+    well-formed URL string at the seam, consistent with
+    `bid.ts:6`. Note: zod's `.url()` uses the WHATWG URL parser, which
+    accepts `javascript:`, `data:`, and other non-http(s) schemes — this
+    schema does NOT filter by protocol. Protocol allow-listing
+    (`https:` / `http:` only) before rendering as a link in
+    `VerdictTimeline` belongs in the dashboard rendering layer
+    (PRP 04). Update 2026-05-16: original draft of this PRP asserted
+    `.url()` rejected `javascript:` — corrected after the audit-test
+    suite proved otherwise.
 
   ## Out of scope
 
