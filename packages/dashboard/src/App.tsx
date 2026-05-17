@@ -1,5 +1,6 @@
 import { LobstertrapPane } from "./iframe/LobstertrapPane.js";
 import { VerdictTimeline } from "./views/VerdictTimeline.js";
+import { ReasonsDrilldown } from "./views/ReasonsDrilldown.js";
 
 /**
  * Three-pane dashboard layout (feature spec line 24 + PRP 04 target).
@@ -36,8 +37,7 @@ export function App(): JSX.Element {
         aria-label="Reasons Drilldown"
         style={{ gridArea: "drilldown", overflow: "auto" }}
       >
-        {/* PRP 06 mounts <ReasonsDrilldown /> here. */}
-        <p>Reasons Drilldown</p>
+        <ReasonsDrilldown />
       </section>
       <section
         data-testid="pane-lobstertrap"
