@@ -153,14 +153,19 @@ export function createHandler(deps: GateDeps) {
     } finally {
       if (verdict !== undefined) {
         const v = verdict;
+        const body = req.body as BidVerificationRequest;
         setImmediate(() => {
           void deps.auditStore
             .put({
+              kind: "verdict",
               id: randomUUID(),
-              requestId: String(Date.now()),
+              advertiserId: body.advertiserId,
+              ts: new Date().toISOString(),
+              request: body,
               verdict: v,
-              request: req.body as BidVerificationRequest,
-              createdAt: new Date().toISOString(),
+              profile: null,
+              declaredIntent: null,
+              detectedIntent: null,
             })
             .catch((e: unknown) => {
               console.error("[gate] gate_audit_dropped", e);

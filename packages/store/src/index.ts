@@ -1,9 +1,4 @@
-import type {
-  PageProfile,
-  Policy,
-  BidVerificationRequest,
-  VerificationVerdict,
-} from "@scout/shared";
+import type { AuditRow, PageProfile, Policy } from "@scout/shared";
 
 export interface ProfileStore {
   get(url: string, contentHash?: string): Promise<PageProfile | null>;
@@ -13,14 +8,6 @@ export interface ProfileStore {
 export interface PolicyStore {
   // ALWAYS tenant-scoped: never call without advertiserId
   get(policyId: string, advertiserId: string): Promise<Policy | null>;
-}
-
-export interface AuditRow {
-  id: string;
-  requestId: string;
-  verdict: VerificationVerdict;
-  request: BidVerificationRequest;
-  createdAt: string; // ISO datetime
 }
 
 export interface AuditStore {
