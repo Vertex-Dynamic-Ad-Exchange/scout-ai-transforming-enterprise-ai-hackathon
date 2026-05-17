@@ -9,6 +9,27 @@ function auditRowDesc(a: AuditRow, b: AuditRow): number {
   return 0;
 }
 
+// The discriminated `AuditRow` carries `pageUrl` in different places
+// per variant: the verdict variant exposes it under `request.pageUrl`;
+// the DLQ variant carries it at the top level.
+function rowPageUrl(row: AuditRow): string {
+  return row.kind === "verdict" ? row.request.pageUrl : row.pageUrl;
+}
+
+function matchesFilter(row: AuditRow, filter: AuditQueryFilter): boolean {
+  if (row.advertiserId !== filter.advertiserId) return false;
+  if (filter.kind !== undefined && row.kind !== filter.kind) return false;
+  if (filter.since !== undefined && row.ts < filter.since) return false;
+  if (filter.until !== undefined && row.ts > filter.until) return false;
+  if (filter.pageUrl !== undefined && rowPageUrl(row) !== filter.pageUrl) return false;
+  // `decision` is a verdict-only field — DLQ rows are excluded by definition.
+  if (filter.decision !== undefined) {
+    if (row.kind !== "verdict") return false;
+    if (row.verdict.decision !== filter.decision) return false;
+  }
+  return true;
+}
+
 export interface ProfileStore {
   get(url: string, contentHash?: string): Promise<PageProfile | null>;
   put(profile: PageProfile): Promise<void>;
@@ -92,7 +113,7 @@ export function createStores(_config?: StoreConfig): {
     },
     async query(filter: AuditQueryFilter): Promise<AuditQueryResult> {
       const rows = auditRows
-        .filter((r) => r.advertiserId === filter.advertiserId)
+        .filter((r) => matchesFilter(r, filter))
         .slice()
         .sort(auditRowDesc);
       return { rows, nextCursor: null };

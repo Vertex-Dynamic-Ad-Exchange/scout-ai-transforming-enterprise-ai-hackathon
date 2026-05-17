@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import type { AuditRow, AuditRowVerdict } from "@scout/shared";
+import type {
+  AuditRow,
+  AuditRowProfileJobDlq,
+  AuditRowVerdict,
+  Decision,
+} from "@scout/shared";
 import { createStores } from "./index.js";
 
 function makeVerdictRow(overrides: Partial<AuditRowVerdict> = {}): AuditRowVerdict {
@@ -28,7 +33,48 @@ function makeVerdictRow(overrides: Partial<AuditRowVerdict> = {}): AuditRowVerdi
     declaredIntent: null,
     detectedIntent: null,
   };
-  return { ...base, ...overrides };
+  const merged: AuditRowVerdict = { ...base, ...overrides };
+  if (overrides.verdict !== undefined) {
+    merged.verdict = { ...base.verdict, ...overrides.verdict };
+  }
+  if (overrides.request !== undefined) {
+    merged.request = { ...base.request, ...overrides.request };
+  }
+  return merged;
+}
+
+function verdictRowFor(
+  advertiserId: string,
+  id: string,
+  ts: string,
+  decision: Decision = "ALLOW",
+  pageUrl = "https://example.com/a",
+): AuditRowVerdict {
+  return makeVerdictRow({
+    id,
+    advertiserId,
+    ts,
+    verdict: { decision } as AuditRowVerdict["verdict"],
+    request: { advertiserId, pageUrl } as AuditRowVerdict["request"],
+  });
+}
+
+function dlqRowFor(
+  advertiserId: string,
+  id: string,
+  ts: string,
+  pageUrl = "https://example.com/dlq",
+): AuditRowProfileJobDlq {
+  return {
+    kind: "profile_job_dlq",
+    id,
+    advertiserId,
+    ts,
+    jobId: `${id}-job`,
+    pageUrl,
+    attempts: 3,
+    nackReason: "timeout",
+  };
 }
 
 describe("AuditStore — happy round-trip", () => {
@@ -43,5 +89,69 @@ describe("AuditStore — happy round-trip", () => {
 
     const fetched = await auditStore.get("A", row.id);
     expect(fetched).toEqual(row);
+  });
+});
+
+describe("AuditStore — filter axes", () => {
+  it("decision: 'DENY' returns only the DENY verdict row", async () => {
+    const { auditStore } = createStores();
+    await auditStore.put(verdictRowFor("A", "r-allow", "2026-05-15T12:00:00.000Z", "ALLOW"));
+    await auditStore.put(verdictRowFor("A", "r-deny", "2026-05-15T12:01:00.000Z", "DENY"));
+    await auditStore.put(
+      verdictRowFor("A", "r-hr", "2026-05-15T12:02:00.000Z", "HUMAN_REVIEW"),
+    );
+
+    const result = await auditStore.query({ advertiserId: "A", decision: "DENY" });
+    expect(result.rows.map((r) => r.id)).toEqual(["r-deny"]);
+  });
+
+  it("pageUrl exact-match returns the single matching row", async () => {
+    const { auditStore } = createStores();
+    await auditStore.put(
+      verdictRowFor("A", "r-1", "2026-05-15T12:00:00.000Z", "ALLOW", "https://example.com/x"),
+    );
+    await auditStore.put(
+      verdictRowFor("A", "r-2", "2026-05-15T12:01:00.000Z", "ALLOW", "https://example.com/y"),
+    );
+    await auditStore.put(
+      verdictRowFor("A", "r-3", "2026-05-15T12:02:00.000Z", "ALLOW", "https://example.com/z"),
+    );
+
+    const result = await auditStore.query({
+      advertiserId: "A",
+      pageUrl: "https://example.com/y",
+    });
+    expect(result.rows.map((r) => r.id)).toEqual(["r-2"]);
+  });
+
+  it("kind: 'profile_job_dlq' returns only DLQ rows; unset returns both variants", async () => {
+    const { auditStore } = createStores();
+    const v = verdictRowFor("A", "r-v", "2026-05-15T12:00:00.000Z");
+    const d = dlqRowFor("A", "r-d", "2026-05-15T12:01:00.000Z");
+    await auditStore.put(v);
+    await auditStore.put(d);
+
+    const both = await auditStore.query({ advertiserId: "A" });
+    expect(both.rows.map((r) => r.id).sort()).toEqual(["r-d", "r-v"]);
+
+    const dlqOnly = await auditStore.query({
+      advertiserId: "A",
+      kind: "profile_job_dlq",
+    });
+    expect(dlqOnly.rows.map((r) => r.id)).toEqual(["r-d"]);
+  });
+
+  it("since/until window returns only rows inside [since, until]", async () => {
+    const { auditStore } = createStores();
+    await auditStore.put(verdictRowFor("A", "r-early", "2026-05-01T00:00:00.000Z"));
+    await auditStore.put(verdictRowFor("A", "r-mid", "2026-05-15T00:00:00.000Z"));
+    await auditStore.put(verdictRowFor("A", "r-late", "2026-05-30T00:00:00.000Z"));
+
+    const result = await auditStore.query({
+      advertiserId: "A",
+      since: "2026-05-10T00:00:00.000Z",
+      until: "2026-05-20T00:00:00.000Z",
+    });
+    expect(result.rows.map((r) => r.id)).toEqual(["r-mid"]);
   });
 });
