@@ -1,4 +1,9 @@
+import { randomUUID } from "node:crypto";
 import type { AuditRow, Decision, PageProfile, Policy } from "@scout/shared";
+
+const AUDIT_LIMIT_DEFAULT = 50;
+const AUDIT_LIMIT_MAX = 200;
+const AUDIT_CURSOR_TTL_MS = 5 * 60 * 1000;
 
 // Reverse-chronological by (ts, id). ISO-8601 string compare is
 // lexicographic-correct; id tiebreak guarantees a deterministic total
@@ -14,6 +19,13 @@ function auditRowDesc(a: AuditRow, b: AuditRow): number {
 // the DLQ variant carries it at the top level.
 function rowPageUrl(row: AuditRow): string {
   return row.kind === "verdict" ? row.request.pageUrl : row.pageUrl;
+}
+
+// Strict reverse-chrono ordering: a row is "older" than the anchor if
+// its (ts, id) tuple is less in the same lex sense `auditRowDesc` uses.
+function isStrictlyOlder(row: AuditRow, anchor: { ts: string; id: string }): boolean {
+  if (row.ts !== anchor.ts) return row.ts < anchor.ts;
+  return row.id < anchor.id;
 }
 
 function matchesFilter(row: AuditRow, filter: AuditQueryFilter): boolean {
@@ -106,17 +118,75 @@ export function createStores(_config?: StoreConfig): {
   };
 
   const auditRows: AuditRow[] = [];
+  // Server-side cursor state (D1). The token is an opaque
+  // `base64url(randomUUID())` string; the anchor is held here, not in
+  // the cursor itself, so a caller cannot forge a cross-tenant pivot.
+  // The SQLite/Redis impl can swap to HMAC; the interface is identical.
+  const cursorTokens = new Map<
+    string,
+    { advertiserId: string; ts: string; id: string; lastAccess: number }
+  >();
+
+  function issueCursor(anchor: { advertiserId: string; ts: string; id: string }): string {
+    const token = Buffer.from(randomUUID()).toString("base64url");
+    cursorTokens.set(token, { ...anchor, lastAccess: Date.now() });
+    return token;
+  }
+
+  function resolveCursor(
+    token: string,
+  ): { advertiserId: string; ts: string; id: string } | null {
+    const entry = cursorTokens.get(token);
+    if (entry === undefined) return null;
+    if (Date.now() - entry.lastAccess > AUDIT_CURSOR_TTL_MS) {
+      cursorTokens.delete(token);
+      return null;
+    }
+    entry.lastAccess = Date.now();
+    return { advertiserId: entry.advertiserId, ts: entry.ts, id: entry.id };
+  }
 
   const auditStore: AuditStore = {
     async put(row: AuditRow): Promise<void> {
       auditRows.push(row);
     },
+    /**
+     * Reverse-chronological tenant-scoped read.
+     *
+     * `cursor` is opaque. A forged or expired cursor, and a cursor
+     * issued for advertiser A replayed under advertiser B, both
+     * resolve to `{ rows: [], nextCursor: null }` (D7) — no error
+     * is raised so cross-tenant enumeration cannot distinguish
+     * "invalid cursor" from "no rows for you". `limit > 200` is a
+     * caller bug and throws RangeError (D3).
+     */
     async query(filter: AuditQueryFilter): Promise<AuditQueryResult> {
-      const rows = auditRows
+      const limit = filter.limit ?? AUDIT_LIMIT_DEFAULT;
+      if (limit > AUDIT_LIMIT_MAX) {
+        throw new RangeError("limit exceeds 200");
+      }
+
+      let candidates = auditRows
         .filter((r) => matchesFilter(r, filter))
         .slice()
         .sort(auditRowDesc);
-      return { rows, nextCursor: null };
+
+      if (filter.cursor !== undefined) {
+        const anchor = resolveCursor(filter.cursor);
+        if (anchor === null || anchor.advertiserId !== filter.advertiserId) {
+          return { rows: [], nextCursor: null };
+        }
+        candidates = candidates.filter((r) => isStrictlyOlder(r, anchor));
+      }
+
+      const rows = candidates.slice(0, limit);
+      const last = rows[rows.length - 1];
+      const hasMore = candidates.length > rows.length;
+      const nextCursor =
+        hasMore && last !== undefined
+          ? issueCursor({ advertiserId: filter.advertiserId, ts: last.ts, id: last.id })
+          : null;
+      return { rows, nextCursor };
     },
     async get(advertiserId: string, id: string): Promise<AuditRow | null> {
       return (

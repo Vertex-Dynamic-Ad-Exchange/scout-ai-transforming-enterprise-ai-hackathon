@@ -168,3 +168,69 @@ describe("AuditStore — empty store edge", () => {
     await expect(auditStore.get("A", "no-such-id")).resolves.toBeNull();
   });
 });
+
+describe("AuditStore — pagination", () => {
+  it("75 rows / limit 30 paginates to 30,30,15 with no dup, no miss, monotonic order", async () => {
+    const { auditStore } = createStores();
+    // 75 rows, varied ts, some same-ts to exercise the id tiebreak (D4).
+    for (let i = 0; i < 75; i++) {
+      // Bucket every 5 ids into the same minute to force same-ts groups.
+      const minute = String(Math.floor(i / 5)).padStart(2, "0");
+      const ts = `2026-05-15T12:${minute}:00.000Z`;
+      const id = `row-${String(i).padStart(3, "0")}`;
+      await auditStore.put(verdictRowFor("A", id, ts));
+    }
+
+    const page1 = await auditStore.query({ advertiserId: "A", limit: 30 });
+    expect(page1.rows).toHaveLength(30);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const page2 = await auditStore.query({
+      advertiserId: "A",
+      limit: 30,
+      cursor: page1.nextCursor!,
+    });
+    expect(page2.rows).toHaveLength(30);
+    expect(page2.nextCursor).not.toBeNull();
+
+    const page3 = await auditStore.query({
+      advertiserId: "A",
+      limit: 30,
+      cursor: page2.nextCursor!,
+    });
+    expect(page3.rows).toHaveLength(15);
+    expect(page3.nextCursor).toBeNull();
+
+    const all = [...page1.rows, ...page2.rows, ...page3.rows];
+    expect(all).toHaveLength(75);
+    expect(new Set(all.map((r) => r.id)).size).toBe(75);
+
+    // Monotonic reverse-chrono — each row is strictly older than its predecessor.
+    for (let i = 1; i < all.length; i++) {
+      const prev = all[i - 1]!;
+      const cur = all[i]!;
+      const tsCmp = cur.ts < prev.ts;
+      const idCmp = cur.ts === prev.ts && cur.id < prev.id;
+      expect(tsCmp || idCmp).toBe(true);
+    }
+  });
+
+  it("limit > 200 throws RangeError; default limit is 50", async () => {
+    const { auditStore } = createStores();
+    for (let i = 0; i < 60; i++) {
+      const id = `row-${String(i).padStart(3, "0")}`;
+      await auditStore.put(
+        verdictRowFor("A", id, `2026-05-15T12:00:${String(i).padStart(2, "0")}.000Z`),
+      );
+    }
+
+    await expect(auditStore.query({ advertiserId: "A", limit: 201 })).rejects.toThrow(
+      RangeError,
+    );
+
+    // Default limit is 50 → 60 rows yields page1 of 50, nextCursor non-null.
+    const defaultPage = await auditStore.query({ advertiserId: "A" });
+    expect(defaultPage.rows).toHaveLength(50);
+    expect(defaultPage.nextCursor).not.toBeNull();
+  });
+});
