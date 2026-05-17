@@ -155,3 +155,16 @@ describe("AuditStore — filter axes", () => {
     expect(result.rows.map((r) => r.id)).toEqual(["r-mid"]);
   });
 });
+
+describe("AuditStore — empty store edge", () => {
+  it("query on an empty store returns { rows: [], nextCursor: null }", async () => {
+    const { auditStore } = createStores();
+    const result = await auditStore.query({ advertiserId: "A" });
+    expect(result).toEqual({ rows: [], nextCursor: null });
+  });
+
+  it("get on an empty store returns null (does not throw)", async () => {
+    const { auditStore } = createStores();
+    await expect(auditStore.get("A", "no-such-id")).resolves.toBeNull();
+  });
+});
